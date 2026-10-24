@@ -40,7 +40,7 @@ subtest 'link logs in, code is single use' => sub ($t) {
   my $code = $t->app->mailer->codes->[0][1];
   like $code, qr/^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/, 'code format';
   $t->get_ok("/auth/$code")->status_is(302);
-  $t->get_ok('/dashboard')->status_is(200)->content_like(qr{Nothing here yet});
+  $t->get_ok('/dashboard')->status_is(200)->content_like(qr{readings stored});
   $t->post_ok('/logout')->status_is(302);
   $t->get_ok('/dashboard')->status_is(302);    # back to login
   $t->get_ok("/auth/$code")->status_is(302);  # reuse bounces to login

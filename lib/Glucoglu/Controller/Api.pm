@@ -1,4 +1,4 @@
-package Glucoglu::Controller::API;
+package Glucoglu::Controller::Api;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use Mojo::JSON 'encode_json';
@@ -25,7 +25,7 @@ sub entries ($self) {
   return $self->render(json => {error => 'invalid JSON body'}, status => 400) unless defined $json;
 
   my @items = ref $json eq 'ARRAY' ? @$json : ref $json eq 'HASH' ? ($json) : ();
-  my ($inserted, $rejected) = (0, 0);
+  my ($inserted, $rejected, $parsed) = (0, 0, 0);
   for my $item (@items) {
     next unless ref $item eq 'HASH';
     my ($value, $ts) = ($item->{sgv}, $item->{date});
@@ -33,6 +33,7 @@ sub entries ($self) {
       $rejected++;
       next;
     }
+    $parsed++;
     my $mgdl = $value <= $MMOL_MAX ? $value * $MMOL_CONV
               : $value >= $MGDL_MIN ? $value
               : undef;
@@ -49,9 +50,10 @@ sub entries ($self) {
     )->rows;
   }
 
-  # O7: keep bodies that produced nothing, so the real field names can be confirmed before schema freeze
+  # O7: keep bodies we could not read at all, so the real field names can be confirmed before schema freeze.
+  # Dedup conflicts and understood-but-rejected values are not captured; they are normal traffic.
   $db->query('INSERT INTO payload_log (user_id, raw) VALUES (?, ?::jsonb)', $uid, encode_json($json))
-    if !$inserted;
+    if !$parsed;
 
   $self->render(json => {inserted => $inserted, rejected => $rejected});
 }

@@ -17,7 +17,7 @@ subtest 'invite' => sub {
   ok !$?, 'invite exits 0';
   is $one->("SELECT count(*) FROM invites WHERE code = 'TEST01'"), 1, 'custom invite code created';
   $admin->('invite');
-  like $one->('SELECT code FROM invites WHERE code <> ?'), qr/^GLU-[0-9a-f]{8}$/, 'random invite code minted';
+  like $one->("SELECT code FROM invites WHERE code <> 'TEST01'"), qr/^GLU-[0-9a-f]{8}$/, 'random invite code minted';
 }, $one;
 
 subtest 'delete removes the user and their data' => sub {
