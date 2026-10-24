@@ -34,6 +34,8 @@ sub startup ($self) {
   $r->get('/auth/:code')->to('auth#verify');
   $r->post('/logout')->to('auth#logout');
   $r->post('/api/v1/entries')->to('api#entries');
+  $r->post('/api/v3/entries')->to('api#entries');
+  $r->get('/api/v2/authorization/request/:token')->to('api#auth_request');
 
   my $dash = $r->under('/dashboard')->to('auth#guard');
   $dash->get('/')->to('dashboard#index')->name('dashboard');

@@ -53,4 +53,14 @@ subtest 'unreadable bodies are captured (O7)' => sub {
   like $one->('SELECT raw->>\'foo\' FROM payload_log'), qr/^1$/, 'captured verbatim';
 }, $one;
 
+subtest 'Nightscout V3 handshake (Juggluco test V3)' => sub {
+  $t->get_ok('/api/v2/authorization/request/tok123')->status_is(200)
+    ->json_is('/token' => 'tok123')->json_like('/exp' => qr/^\d+$/);
+  $t->get_ok('/api/v2/authorization/request/WRONG')->status_is(401);
+  $t->post_ok('/api/v3/entries', {Authorization => 'Bearer tok123'},
+      json => [{type => 'sgv', date => 1730004000000, sgv => 118}])
+    ->status_is(200)->json_is('/inserted' => 1);
+  is $one->('SELECT count(*) FROM readings'), 5, 'v3 upload stored';
+}, $one;
+
 done_testing();

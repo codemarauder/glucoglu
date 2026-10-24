@@ -8,6 +8,16 @@ my $MMOL_MAX  = 27.8;
 my $MGDL_MIN  = 40;
 my $MMOL_CONV = 18.018;
 
+# Nightscout V3 handshake (Juggluco "test V3"): GET /api/v2/authorization/request/<secret>
+# must answer {"token": ..., "exp": <unix seconds>}. We return the ingest token itself,
+# so the existing Bearer check in entries() accepts what Juggluco sends afterwards.
+sub auth_request ($self) {
+  my $token = $self->stash('token');
+  my $uid   = $self->app->pg->db->query('SELECT id FROM users WHERE api_token = ?', $token)->arrays->[0][0];
+  return $self->render(json => {error => 'invalid token'}, status => 401) unless $uid;
+  $self->render(json => {token => $token, exp => time + 8 * 3600});
+}
+
 # POST /api/v1/entries — Juggluco pushes Nightscout-style JSON here:
 #   [{"type":"sgv","date":<epoch ms>,"sgv":<value>}, ...]   (single object also accepted)
 # shortcut: only the "sgv" and "date" fields are parsed until the real-payload check (O7)
