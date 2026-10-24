@@ -59,3 +59,9 @@ tr.good td { background: rgba(40, 167, 69, 0.14); }
 tr.warn td { background: rgba(255, 193, 7, 0.14); }
 tr.bad  td { background: rgba(220, 53, 69, 0.12); }
 .notice { background: rgba(22, 112, 160, 0.12); padding: .6rem .9rem; border-radius: 8px; font-size: .9rem; }
+.today-head, .today-deltas { text-align: center; margin: .3rem 0; }
+.today-current { font-size: 2rem; font-weight: 700; }
+.today-unit { font-size: 1rem; font-weight: 400; opacity: .8; }
+.today-glyph { font-size: 1.8rem; vertical-align: middle; padding-left: .4rem; }
+.today-age { font-size: .85rem; opacity: .7; display: block; margin-top: .1rem; }
+.today-deltas { font-size: .95rem; opacity: .9; }

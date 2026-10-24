@@ -1,8 +1,8 @@
 package Glucoglu::Controller::Dashboard;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
-use POSIX qw(strftime);
-use Glucoglu::Metrics qw(agp agp_svg tier1 tz_offset);
+use POSIX qw(floor strftime);
+use Glucoglu::Metrics qw(agp agp_svg deltas tier1 today_svg tz_offset);
 
 # D10: every read query targets this user — session user, or an owner-granted share.
 # The caregiver switcher (step 8) only has to add ?user_id= to the URL.
@@ -41,6 +41,16 @@ sub index ($self) {
   my $off = tz_offset($user->{tz});
   my $svg = @$rows ? agp_svg(agp($rows, $off)) : '';
 
+  # Today view (§6): all sources since local midnight — spot values belong in the daily trace
+  my $now      = time;
+  my $midnight = floor(($now + $off) / 86400) * 86400 - $off;
+  my $today    = $db->query(
+    'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl, source_type FROM readings
+       WHERE user_id = ? AND ts >= to_timestamp(?) ORDER BY ts', $target, $midnight
+  )->hashes->to_array;
+  my $dlt       = @$today ? deltas($today, $now) : undef;
+  my $today_svg = @$today ? today_svg($today, $off) : '';
+
   # Traffic-light bands (Battelino 2019 Table 2): target / partial / off-target per metric
   my %grade = $m->{n} ? (
     tir    => $m->{tir}    > 70   ? 'good' : $m->{tir}    >= 50  ? 'warn' : 'bad',
@@ -61,6 +71,8 @@ sub index ($self) {
     target       => $target,
     latest       => $latest,
     latest_local => $latest ? strftime('%Y-%m-%d %H:%M', gmtime($latest->{ts} + $off)) : undef,
+    dlt          => $dlt,
+    today_svg    => $today_svg,
   );
 }
 

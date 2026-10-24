@@ -152,6 +152,18 @@ Clinical targets (verified):
     
 *   AGP chart: percentiles 5/25/50/75/95 by time of day (Mazze 1987; Bergenstal 2013).
     
+*   AGP data note (observed 2026-10-24): a slot with a single sample collapses to the median line (zero-width percentile bands); bands appear where >=2 days overlap a slot. Sharp p5 troughs are isolated dips, smooth p95 peaks are sustained highs — percentile semantics, not defects. Thin windows are flagged by the data-sufficiency metric, not by hiding the chart.
+    
+*   **Today view ("100 m race")** — top of the dashboard, above AGP ("marathon"):
+    
+    *   Current value with trend arrow and reading age ("238 mg/dL ↗ 12 min ago"). Age matters on Libre 1: data is only as fresh as the last scan.
+        
+    *   Since-local-midnight line chart of ALL readings (history + spot + stream). Spot values belong in the daily trace — their scan bias invalidates summary metrics, not the record of what actually happened.
+        
+    *   Y guides 70 / 180 / 250 mg/dL; the 70–180 band shaded; fixed 40–400 scale for consistency with AGP.
+        
+*   **Trend and deltas (v1 decision, revised after field review)**: the "brace for it" signal is the delta numbers, not the arrow. Display Δ1 / Δ5 / Δ15 (change over the last 1 / 5 / 15 minutes, each from readings bracketing the window, each "--" when no data brackets it). Arrow uses Dexcom thresholds on mg/dL/min slope (>=3 Double, 2-3 Single, 1-2 FortyFive, <1 Flat, mirrored down) computed from the best available basis (Delta5 if data brackets it, else Delta15 -- an approximation at NFC cadence). Doubles are genuinely rarer on Libre 1: spikes between 15-min points are invisible to the sensor, and thresholds are NOT lowered to compensate -- the deltas carry the speed information. Juggluco's own direction (uploader `direction` field; mirror TSV `Rate`/`ChangeLabel`) is preserved in readings.raw for audit (TSV import includes it); display is always computed, so it cannot disagree across sources. Nightscout returns `delta` in the display unit but classifies arrows in mg/dL/min -- we do the same.
+    
 *   PWA dashboard, vendored JS, offline-capable.
     
 

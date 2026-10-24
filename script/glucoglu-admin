@@ -71,6 +71,7 @@ elsif ($cmd eq 'import') {
   open my $fh, '<', $file or die "cannot open $file: $!\n";
   my ($inserted, $dupes, $rejected) = (0, 0, 0);
   while (my $line = <$fh>) {
+    $line =~ s/\r?\n$//;
     my @c = split /\t/, $line;
     next unless @c >= 7 && ($c[2] // '') =~ /^\d+$/ && ($c[6] // '') =~ /^\d+(\.\d+)?$/;   # header/noise lines
     my ($ts, $value) = ($c[2], $c[6]);
@@ -82,7 +83,11 @@ elsif ($cmd eq 'import') {
          ON CONFLICT (user_id, ts, source_type) DO NOTHING',
       $uid, $ts, $mgdl, $type,
       $type eq 'history' ? 15 : 0,
-      encode_json({sensor => $c[0], id => $c[1] + 0, min => $c[5] + 0})
+      encode_json({
+        sensor => $c[0], id => $c[1] + 0, min => $c[5] + 0,
+        (defined $c[7] ? (rate => $c[7] + 0) : ()),      # Juggluco's own trend (scans.tsv)
+        (defined $c[8] ? (trend => $c[8]) : ()),        # preserved for audit (§6)
+      })
     )->rows;
     $rows ? $inserted++ : $dupes++;
   }

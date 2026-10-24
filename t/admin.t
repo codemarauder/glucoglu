@@ -55,11 +55,11 @@ subtest 'login link works without mail' => sub {
 
 subtest 'TSV import (Libre 1 mirror path)' => sub {
   my ($fh, $file) = tempfile(UNLINK => 1, SUFFIX => '.tsv');
-  print $fh "Sensorid\tnr\tUnixTime\tYYYY-mm-ddTHH:MM:SS\tTZ\tMin\tmg/dL\n";
-  print $fh join("\t", qw(3MH01DZF38H 4 1764253834 2025-11-27T20:00:34 5.5 60 147)), "\n";
-  print $fh join("\t", qw(3MH01DZF38H 5 1764254741 2025-11-27T20:15:41 5.5 75 7.8)), "\n";   # mmol/L value
-  print $fh join("\t", qw(3MH01DZF38H 6 1764256553 2025-11-27T20:30:47 5.5 90 30)),  "\n";   # between unit ranges
-  print $fh join("\t", qw(0M000Y36FAR 7 1792847053 2026-10-24T18:34:13 5.5 1635 244)), "\n";
+  print $fh "Sensorid\tnr\tUnixTime\tYYYY-mm-ddTHH:MM:SS\tTZ\tMin\tmg/dL\tRate\tChangeLabel\n";
+  print $fh join("\t", qw(3MH01DZF38H 4 1764253834 2025-11-27T20:00:34 5.5 60 147 -0.3 STABLE)), "\n";
+  print $fh join("\t", qw(3MH01DZF38H 5 1764254741 2025-11-27T20:15:41 5.5 75 7.8 -0.1 STABLE)), "\n";   # mmol/L value
+  print $fh join("\t", qw(3MH01DZF38H 6 1764256553 2025-11-27T20:30:47 5.5 90 30 0.2 STABLE)),  "\n";    # between unit ranges
+  print $fh join("\t", qw(0M000Y36FAR 7 1792847053 2026-10-24T18:34:13 5.5 1635 244 -0.09 STABLE)), "\n";
   close $fh;
 
   my $out = qx{$^X script/glucoglu-admin import history $file 'imp\@b.co' 2>&1};
@@ -70,6 +70,7 @@ subtest 'TSV import (Libre 1 mirror path)' => sub {
     'mmol/L converted to mg/dL';
   is $one->("SELECT source_type FROM readings WHERE ts = to_timestamp(1764253834)"), 'history', 'source_type history';
   is $one->("SELECT raw->>'sensor' FROM readings"), '3MH01DZF38H', 'raw keeps the sensor id';
+  is $one->("SELECT raw->>'trend' FROM readings WHERE ts = to_timestamp(1764253834)"), 'STABLE', "Juggluco's trend label kept for audit";
 
   $out = qx{$^X script/glucoglu-admin import history $file 'imp\@b.co' 2>&1};
   like $out, qr/imported 0 history readings.*3 duplicates/, 're-run inserts nothing';

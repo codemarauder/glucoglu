@@ -2,9 +2,10 @@ package Glucoglu::Metrics;
 # Pure Tier 1 metrics engine (design §7, rows 1-11) — no DB, no HTTP; testable in isolation.
 # Rows must be [{ts => epoch seconds, mg_dl => value}, ...] sorted by ts.
 use Mojo::Base -base, -signatures;
+use utf8;
 
 use Exporter 'import';
-our @EXPORT_OK = qw(tier1 agp agp_svg events percentile tz_offset);
+our @EXPORT_OK = qw(tier1 agp agp_svg events percentile tz_offset deltas today_svg);
 
 # Consensus thresholds (Battelino 2019; 54: IHSG 2017). Inclusive bounds: TIR is 70<=G<=180.
 my ($TIR_LO, $TIR_HI, $TAR_HI, $TBR_LO, $TBR_VLOW) = (70, 180, 250, 70, 54);
@@ -141,6 +142,88 @@ sub agp_svg ($bands) {
     push @parts, sprintf(
       q{<text x="%.1f" y="260" font-size="10" text-anchor="middle" fill="currentColor" opacity="0.7">%02d</text>},
       $xx, $hour);
+  }
+  push @parts, '</svg>';
+  return join "\n", @parts;
+}
+
+# Deltas (§6 "Trend and deltas"): ΔX = latest − the newest reading at or before
+# (latest − X min), valid only if that reference is within 2X of the latest, else undef.
+# This is what makes the Libre 1 case work: two history points give Δ15; a spot scanned
+# 5 min after a history point gives Δ5 = spot − history, and Δ15 = spot − the point before.
+# Arrow: Dexcom thresholds on mg/dL/min slope, basis Δ5 else Δ15 else Δ1 (best available).
+sub deltas ($rows, $now) {
+  my @sorted = sort { $a->{ts} <=> $b->{ts} } @$rows;
+  return {glyph => '?'} unless @sorted;
+  my $latest = $sorted[-1];
+  my %d = (age => $now - $latest->{ts});
+  my %pair;    # window => [delta, elapsed_minutes]
+  for my $min (1, 5, 15) {
+    my $ref;
+    for my $r (@sorted) {
+      last if $r->{ts} > $latest->{ts} - $min * 60;
+      $ref = $r;
+    }
+    next unless $ref && $latest->{ts} != $ref->{ts} && $latest->{ts} - $ref->{ts} <= 2 * $min * 60;
+    $pair{$min} = [$latest->{mg_dl} - $ref->{mg_dl}, ($latest->{ts} - $ref->{ts}) / 60];
+    $d{"d$min"} = $pair{$min}[0];
+  }
+  my $basis = $pair{5} // $pair{15} // $pair{1};
+  if ($basis) {
+    my $slope = $d{slope} = $basis->[0] / $basis->[1];
+    ($d{arrow}, $d{glyph}) =
+        $slope >= 3  ? ('DoubleUp', '↑↑')
+      : $slope >= 2  ? ('SingleUp', '↑')
+      : $slope >= 1  ? ('FortyFiveUp', '↗')
+      : $slope >  -1 ? ('Flat', '→')
+      : $slope >  -2 ? ('FortyFiveDown', '↘')
+      : $slope >  -3 ? ('SingleDown', '↓')
+      :                ('DoubleDown', '↓↓');
+  }
+  return \%d;
+}
+
+# Today trace: all readings since local midnight, line broken at >30-min gaps,
+# spot values drawn as dots. Same 40-400 scale and guides as the AGP.
+sub today_svg ($rows, $tz_off) {
+  return '' unless @$rows;
+  my ($X0, $X1, $Y0, $Y1) = (42, 940, 16, 246);
+  my ($YMIN, $YMAX) = (40, 400);
+  my $y = sub ($v) { $Y1 - ($v - $YMIN) / ($YMAX - $YMIN) * ($Y1 - $Y0) };
+  my $x = sub ($ts) { my $l = (($ts + $tz_off) % 86400 + 86400) % 86400; $X0 + $l / 86400 * ($X1 - $X0) };
+
+  my @parts = sprintf
+    q{<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 270" role="img" aria-label="Today's glucose trace">
+<rect x="%d" y="%.1f" width="%d" height="%.1f" fill="#28a745" fill-opacity="0.07"/>
+<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="currentColor" opacity="0.3"/>},
+    $X0, $y->(180), $X1 - $X0, $y->(70) - $y->(180), $X0, $Y0, $X1 - $X0, $Y1 - $Y0;
+  for my $line ([70, '70'], [180, '180'], [250, '250']) {
+    my $yy = $y->($line->[0]);
+    push @parts, sprintf(
+      q{<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="currentColor" stroke-dasharray="4 4" opacity="0.4"/>
+<text x="944" y="%.1f" font-size="10" text-anchor="end" fill="currentColor" opacity="0.7">%s</text>},
+      $X0, $yy, $X1, $yy, $yy + 3, $line->[1]);
+  }
+
+  my (@segs, $prev);
+  for my $r (@$rows) {
+    push @segs, [] if !@segs || (defined $prev && $r->{ts} - $prev > 1800);
+    push $segs[-1]->@*, $r;
+    $prev = $r->{ts};
+  }
+  for my $seg (@segs) {
+    push @parts, sprintf q{<path d="%s" fill="none" stroke="#1f5c99" stroke-width="2"/>},
+      'M' . join(' L', map { sprintf('%.1f,%.1f', $x->($_->{ts}), $y->($_->{mg_dl})) } @$seg);
+    push @parts, sprintf(q{<circle cx="%.1f" cy="%.1f" r="3" fill="#1f5c99"/>},
+      $x->($_->{ts}), $y->($_->{mg_dl})) for grep { ($_->{source_type} // '') eq 'spot' } @$seg;
+  }
+  my $last = $segs[-1][-1];
+  push @parts, sprintf q{<circle cx="%.1f" cy="%.1f" r="4" fill="#1f5c99"/>},
+    $x->($last->{ts}), $y->($last->{mg_dl});
+  for my $hour (0, 6, 12, 18, 24) {
+    push @parts, sprintf(
+      q{<text x="%.1f" y="260" font-size="10" text-anchor="middle" fill="currentColor" opacity="0.7">%02d</text>},
+      $X0 + $hour / 24 * ($X1 - $X0), $hour);
   }
   push @parts, '</svg>';
   return join "\n", @parts;

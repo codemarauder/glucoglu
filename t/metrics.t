@@ -1,7 +1,7 @@
 use Mojo::Base -strict, -signatures;
 
 use Test::More;
-use Glucoglu::Metrics qw(agp agp_svg events percentile tier1 tz_offset);
+use Glucoglu::Metrics qw(agp agp_svg deltas events percentile tier1 today_svg tz_offset);
 
 subtest 'percentile' => sub {
   is percentile([1, 2, 3, 4], 50), 2.5,  'interpolated median';
@@ -77,6 +77,49 @@ subtest 'AGP keeps data gaps as gaps' => sub {
   my $svg = agp_svg($bands);
   my @paths = $svg =~ /<path d="(.*?)"/g;
   is scalar @paths, 6, 'two runs x (outer band + inner band + median)';
+};
+
+subtest 'deltas and arrow (Libre 1 reality)' => sub {
+  my $now = 1_000_000;
+  # history points 15 min apart; a spot scan 5 min after the last history point
+  my $rows = [
+    {ts => $now - 1500, mg_dl => 100},
+    {ts => $now - 600,  mg_dl => 110},
+    {ts => $now - 300,  mg_dl => 118, source_type => 'spot'},
+  ];
+  my $d = deltas($rows, $now);
+  is $d->{age},   300,  'spot is 5 min old';
+  is $d->{d5},    8,   'Δ5 = spot vs last history point';
+  is $d->{d15},   18,  'Δ15 = spot vs the point before';
+  ok !defined $d->{d1}, 'no 1-min data';
+  is $d->{arrow}, 'FortyFiveUp', 'slope 1.6 mg/dL/min';
+  is $d->{glyph}, '↗', 'glyph';
+
+  # two history points only: Δ15, no Δ5/Δ1 — the sensor-reported cadence
+  $d = deltas([{ts => $now - 1800, mg_dl => 120}, {ts => $now - 900, mg_dl => 150}], $now);
+  is $d->{d15}, 30, 'Δ15 from the last two history points';
+  ok !defined $d->{d5}, 'no 5-min delta from 15-min cadence';
+  is $d->{arrow}, 'SingleUp', '30 mg/dL over 15 min = 2.0 slope';
+
+  my $slope = sub ($v, $e) { deltas([{ts => $now - $e * 60, mg_dl => 100}, {ts => $now, mg_dl => 100 + $v}], $now)->{arrow} };
+  is $slope->(20, 5),  'DoubleUp',      '+4/min';
+  is $slope->(-20, 5), 'DoubleDown',    '-4/min';
+  is $slope->(-5, 5),  'FortyFiveDown', '-1/min';
+  is $slope->(2, 15),  'Flat',          'reference too far for Δ5: Δ15 slope ~0.09';
+  is deltas([], $now)->{glyph}, '?', 'no data';
+};
+
+subtest 'today trace' => sub {
+  my $rows = [
+    {ts => 3600,  mg_dl => 100, source_type => 'history'},
+    {ts => 5400,  mg_dl => 110, source_type => 'history'},
+    {ts => 36000, mg_dl => 150, source_type => 'spot'},    # 8-hour gap: separate segment
+  ];
+  my $svg = today_svg($rows, 0);
+  like $svg, qr{<svg.*Today}s,   'SVG renders';
+  my @lines = $svg =~ /stroke="#1f5c99" stroke-width="2"/g;
+  is scalar @lines, 2, 'gap breaks the trace into two segments';
+  like $svg, qr/<circle[^>]*r="3"/, 'spot scans are dots';
 };
 
 done_testing();

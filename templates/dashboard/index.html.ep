@@ -4,16 +4,26 @@
 % if (my $notice = flash 'notice') {
 <p class="notice"><%= $notice %></p>
 % }
-<h2>Latest</h2>
-% if ($latest) {
-<p><strong><%= $latest->{mg_dl} %> mg/dL</strong> at <%= $latest_local %> local time</p>
-% } else {
-<p>No readings yet. Point Juggluco at <code><%= url_for('/api/v1/entries')->to_abs %></code><br>
-with token <code><%= $token %></code> (<code>?token=</code> or <code>Authorization: Bearer</code>).</p>
+<h2>Today <span class="hint">the 100 m race</span></h2>
+% if ($dlt) {
+% my $dd = sub { defined $_[0] ? sprintf('%+.0f', $_[0]) : '—' };
+<p class="today-head">
+  <span class="today-current"><%= $latest->{mg_dl} %> <span class="today-unit">mg/dL</span></span>
+  <span class="today-glyph"><%== $dlt->{glyph} // '?' %></span>
+  <span class="today-age">(<%= $dlt->{age} < 3600 ? int($dlt->{age}/60).' min' : sprintf('%.1f h', $dlt->{age}/3600) %> ago)</span>
+</p>
+<p class="today-deltas">
+  Δ1 <%== $dd->($dlt->{d1}) %> mg/dL | Δ5 <%== $dd->($dlt->{d5}) %> mg/dL | Δ15 <%== $dd->($dlt->{d15}) %> mg/dL
+</p>
+% if ($today_svg) {
+<%== $today_svg %>
+<p class="hint">Dots are NFC spot scans; green band = 70–180 target range; gaps = no data.</p>
 % }
-<p><%= $count %> reading<%= $count == 1 ? '' : 's' %> stored.</p>
+% } else {
+<p>No readings today yet. Scan the sensor — data arrives with the next mirror sync.</p>
+% }
 
-<h2>AGP <span class="hint">percentiles by time of day</span></h2>
+<h2>AGP <span class="hint">the marathon — percentiles by time of day</span></h2>
 <p class="hint">
 % for my $d (7, 14, 30, 90) {
   % if ($d == $days) {
@@ -45,6 +55,9 @@ with token <code><%= $token %></code> (<code>?token=</code> or <code>Authorizati
 <p class="hint">Row shading — green: at target, amber: partial, red: off-target (Battelino 2019, Table 2).</p>
 % }
 
+<h2>Ingest</h2>
+<p class="hint"><%= $count %> reading<%= $count == 1 ? '' : 's' %> stored · uploader URL:
+  <code><%= url_for('/api/v1/entries')->to_abs %></code> · token <code><%= $token %></code></p>
 <form method="post" action="/dashboard/token">
   <button class="link">Regenerate ingest token</button>
 </form>
