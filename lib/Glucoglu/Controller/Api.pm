@@ -78,6 +78,7 @@ sub entries ($self) {
   $db->query('INSERT INTO payload_log (user_id, raw) VALUES (?, ?::jsonb)', $uid, encode_json($json))
     if !$parsed;
 
+  $self->app->log->info("ingest uid=$uid inserted=$inserted rejected=$rejected");
   $self->render(json => {inserted => $inserted, rejected => $rejected});
 }
 
