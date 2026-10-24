@@ -17,7 +17,8 @@ sub startup ($self) {
   $self->secrets($self->config->{secrets});
   $self->sessions->secure(1) if $self->mode eq 'production';
 
-  $self->helper(gen_token => sub ($c, $len = 20) {
+  # 12 chars from the 32-symbol alphabet = 2^60: not brute-forceable online, still typeable on a phone.
+  $self->helper(gen_token => sub ($c, $len = 12) {
     join '', map { $ALPHABET[int rand @ALPHABET] } 1 .. $len;
   });
 

@@ -34,6 +34,7 @@ subtest 'registration needs an invite' => sub ($t) {
   $t->post_ok('/login' => form => {email => 'a@b.co', invite => 'TEST01'})->status_is(302);
   ok @{$t->app->mailer->codes} == 1, 'one mail sent';
   is $t->app->mailer->codes->[0][0], 'a@b.co', 'mail goes to the right address';
+  is length($db->query("SELECT api_token FROM users WHERE email = 'a\@b.co'")->array->[0]), 12, '12-char ingest token';
 }, $t;
 
 subtest 'link logs in, code is single use' => sub ($t) {
