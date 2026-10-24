@@ -13,7 +13,7 @@
   <span class="today-age">(<%= $dlt->{age} < 3600 ? int($dlt->{age}/60).' min' : sprintf('%.1f h', $dlt->{age}/3600) %> ago)</span>
 </p>
 <p class="today-deltas">
-  Δ1 <%== $dd->($dlt->{d1}) %> mg/dL | Δ5 <%== $dd->($dlt->{d5}) %> mg/dL | Δ15 <%== $dd->($dlt->{d15}) %> mg/dL
+  <strong>Δ1</strong> <%== $dd->($dlt->{d1}) %> mg/dL | <strong>Δ5</strong> <%== $dd->($dlt->{d5}) %> mg/dL | <strong>Δ15</strong> <%== $dd->($dlt->{d15}) %> mg/dL
 </p>
 % if ($today_svg) {
 <%== $today_svg %>
