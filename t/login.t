@@ -75,4 +75,15 @@ subtest 'invite is burned, rate limit caps mail' => sub ($t) {
   $t->get_ok('/login')->status_is(200);    # page still answers under the limit
 }, $t;
 
+subtest 'deleted user is logged out, not a 500' => sub ($t) {
+  $db->query("INSERT INTO invites (code) VALUES ('TEST02')");
+  $t->post_ok('/login' => form => {email => 'del@b.co', invite => 'TEST02'})->status_is(302);
+  my $code = $t->app->mailer->codes->[-1][1];
+  $t->post_ok('/login/check' => form => {code => $code})->status_is(302);
+  $t->get_ok('/dashboard')->status_is(200);
+  $db->query("DELETE FROM users WHERE email = 'del\@b.co'");
+  $t->get_ok('/dashboard')->status_is(302);
+  $t->get_ok('/dashboard')->status_is(302);    # stays logged out, no crash
+}, $t;
+
 done_testing();

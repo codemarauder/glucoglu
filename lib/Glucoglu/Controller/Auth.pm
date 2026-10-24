@@ -7,7 +7,13 @@ my $RATE_LIMIT = 5;    # login mails per email address per hour
 my $TTL        = '10 minutes';
 
 sub guard ($self) {
-  return 1 if $self->session('user_id');
+  my $uid = $self->session('user_id');
+  if ($uid) {
+    # A session can outlive its user (admin delete, DB wipe): log it out, never 500.
+    return 1
+      if $self->app->pg->db->query('SELECT 1 FROM users WHERE id = ?', $uid)->arrays->[0][0];
+    $self->session(expires => 1);
+  }
   $self->redirect_to('login');
   return 0;
 }
