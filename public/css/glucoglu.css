@@ -66,8 +66,18 @@ tr.bad  td { background: rgba(220, 53, 69, 0.12); }
 .today-glyph { font-size: 1.8rem; vertical-align: middle; padding-left: .4rem; }
 .today-age { font-size: .85rem; opacity: .7; display: block; margin-top: .1rem; }
 .today-deltas { font-size: .95rem; opacity: .9; }
-.daynav { text-align: center; margin: .4rem 0; font-size: 1.05rem; }
-.daynav a { text-decoration: none; font-size: 1.6rem; padding: 0 .9rem; vertical-align: middle; }
+.daynav { text-align: center; margin: .4rem 0; font-size: .95rem; opacity: .8; }
+.graph { position: relative; }
+.graph > p { text-align: center; padding: 3rem 0; opacity: .7; }
+.navbtn {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 2.4rem; height: 2.4rem; line-height: 2.4rem; text-align: center;
+  font-size: 2rem; text-decoration: none; border-radius: 50%;
+  background: rgba(127, 127, 127, .3); color: inherit;
+}
+.navbtn.left  { left: .4rem; }
+.navbtn.right { right: .4rem; }
+.navbtn.off   { opacity: .25; pointer-events: none; }
 .winnav { text-align: center; margin: .4rem 0; font-size: .95rem; }
 .winnav .sep { opacity: .4; padding: 0 .8rem; }
 .caption { text-align: right; }

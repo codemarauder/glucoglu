@@ -18,21 +18,26 @@
 % } else {
 <p>No readings today yet. Scan the sensor — data arrives with the next mirror sync.</p>
 % }
-<p class="daynav">
-% if ($day < 90) {
-  <a href="<%= url_for->query(day => $day + 1, days => $days, user_id => $target) %>" title="previous day">‹</a>
-% }
-  <span><%= $day == 0 ? 'Today' : $day_label %></span>
-% if ($day > 0) {
-  <a href="<%= url_for->query(day => $day - 1, days => $days, user_id => $target) %>" title="next day">›</a>
-  <a class="hint" href="<%= url_for->query(day => 0, days => $days, user_id => $target) %>">today</a>
-% }
-</p>
+<div class="graph">
 % if ($today_svg) {
 <%== $today_svg %>
-<p class="hint caption">Dots are NFC spot scans; green band = 70–180 target range; gaps = no data.</p>
 % } else {
-<p>No readings for this day.</p>
+  <p>No readings for this day.</p>
+% }
+% if ($day < 90) {
+  <a class="navbtn left" href="<%= url_for->query(day => $day + 1, days => $days, user_id => $target) %>" title="previous day">‹</a>
+% } else {
+  <span class="navbtn left off">‹</span>
+% }
+% if ($day > 0) {
+  <a class="navbtn right" href="<%= url_for->query(day => $day - 1, days => $days, user_id => $target) %>" title="next day">›</a>
+% } else {
+  <span class="navbtn right off">›</span>
+% }
+</div>
+<p class="daynav"><%= $day == 0 ? 'Today' : $day_label %></p>
+% if ($today_svg) {
+<p class="hint caption">Dots are NFC spot scans; green band = 70–180 target range; gaps = no data.</p>
 % }
 
 <h2>AGP <span class="hint">the marathon — percentiles by time of day</span></h2>
