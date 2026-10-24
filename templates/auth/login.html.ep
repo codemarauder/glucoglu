@@ -7,6 +7,14 @@
   <label>Invite code <span class="hint">(first login only)</span>
     <input name="invite" autocomplete="off">
   </label>
+  <input type="hidden" name="tz" value="UTC">
   <button>Send login code</button>
 </form>
+<script>
+  (function () {  // report the browser's UTC offset once, e.g. +05:30 (D13)
+    var m = -new Date().getTimezoneOffset();
+    var s = (m < 0 ? '-' : '+') + String(Math.floor(Math.abs(m) / 60)).padStart(2, '0') + ':' + String(Math.abs(m) % 60).padStart(2, '0');
+    document.querySelector('input[name=tz]').value = s;
+  })();
+</script>
 <p class="hint">We send one link and one code to your address. No password.</p>

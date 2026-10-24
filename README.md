@@ -6,12 +6,13 @@ Self-hosted glucose monitoring and analytics. Perl / Mojolicious + PostgreSQL + 
 
 Design and scope: `libreglue-scope-design.md` (handoff v2.1). License: AGPLv3.
 
-## What step 1 contains
+## What v1 contains so far
 
 - Mojolicious skeleton
 - Login: email link + code (no passwords, D9). Invite code on first login only.
-- SMTP for the mail (any relay). Credentials from environment.
 - PostgreSQL: full v1 schema — users, invites, login tokens, mail_log, readings, meals, insulin, IOB, exercise, notes, lab A1c, shares (auto-migrated at startup).
+- Ingest: Juggluco uploader (Libre 2+ stream, Nightscout V1/V3 auth) and mirror TSV import (Libre 1 scans/history).
+- Dashboard: Tier 1 metrics — TIR/TAR/TBR, mean, SD, CV, GMI, eA1c, data sufficiency, hypo/hyper events — plus AGP percentiles by time of day; windows 7/14/30/90 days; read-only caregiver access via the shares table (D10).
 
 ## Development
 

@@ -39,6 +39,10 @@ sub request ($self) {
   return $self->render('auth/login', error => 'Too many attempts. Try again in an hour.')
     if $sent >= $RATE_LIMIT;
 
+  # D13: the login form reports the browser's time zone once (hidden field, JS-filled)
+  my $tz = $self->param('tz') // 'UTC';
+  $tz = 'UTC' unless $tz =~ /^[+-]\d{2}:\d{2}$/;
+
   # ->arrays->[0][0] is undef when there is no row; ->array->[0] would die on an empty result
   my $uid = $db->query('SELECT id FROM users WHERE email = ?', $email)->arrays->[0][0];
   if (!$uid) {
@@ -49,9 +53,10 @@ sub request ($self) {
       $invite
     )->array;
     return $self->render('auth/login', error => 'That invite code is not valid.') unless $used;
-    $uid = $db->query('INSERT INTO users (email, api_token) VALUES (?, ?) RETURNING id',
-      $email, $self->gen_token)->arrays->[0][0];
+    $uid = $db->query('INSERT INTO users (email, api_token, tz) VALUES (?, ?, ?) RETURNING id',
+      $email, $self->gen_token, $tz)->arrays->[0][0];
   }
+  else { $db->query('UPDATE users SET tz = ? WHERE id = ?', $tz, $uid) }
 
   my $code = $self->_gen_code;
   my $norm = $code =~ s/-//gr;    # verify strips separators; hash the same normalized form
