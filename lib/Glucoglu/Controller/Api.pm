@@ -48,7 +48,7 @@ sub entries ($self) {
   return $self->render(json => {error => 'invalid JSON body'}, status => 400) unless defined $json;
 
   my @items = ref $json eq 'ARRAY' ? @$json : ref $json eq 'HASH' ? ($json) : ();
-  my ($inserted, $rejected, $parsed) = (0, 0, 0);
+  my ($inserted, $rejected, $parsed, $from, $to) = (0, 0, 0, undef, undef);
   for my $item (@items) {
     next unless ref $item eq 'HASH';
     my ($value, $ts) = ($item->{sgv}, $item->{date});
@@ -57,6 +57,8 @@ sub entries ($self) {
       next;
     }
     $parsed++;
+    $from = $ts if !defined $from || $ts < $from;
+    $to   = $ts if !defined $to   || $ts > $to;
     my $mgdl = $value <= $MMOL_MAX ? $value * $MMOL_CONV
               : $value >= $MGDL_MIN ? $value
               : undef;
@@ -78,7 +80,9 @@ sub entries ($self) {
   $db->query('INSERT INTO payload_log (user_id, raw) VALUES (?, ?::jsonb)', $uid, encode_json($json))
     if !$parsed;
 
-  $self->app->log->info("ingest uid=$uid inserted=$inserted rejected=$rejected");
+  $self->app->log->info(sprintf 'ingest uid=%s items=%d inserted=%d rejected=%d from=%s to=%s',
+    $uid, scalar @items, $inserted, $rejected,
+    defined($from) ? scalar(gmtime $from / 1000) : '-', defined($to) ? scalar(gmtime $to / 1000) : '-');
   $self->render(json => {inserted => $inserted, rejected => $rejected});
 }
 
