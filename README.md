@@ -11,7 +11,7 @@ Design and scope: `libreglue-scope-design.md` (handoff v2.1). License: AGPLv3.
 - Mojolicious skeleton
 - Login: email link + code (no passwords, D9). Invite code on first login only.
 - SMTP for the mail (any relay). Credentials from environment.
-- PostgreSQL: users, invites, tokens, mail_log (auto-migrated at startup).
+- PostgreSQL: full v1 schema — users, invites, login tokens, mail_log, readings, meals, insulin, IOB, exercise, notes, lab A1c, shares (auto-migrated at startup).
 
 ## Development
 

@@ -37,8 +37,7 @@ sub auth_request ($self) {
 
 # POST /api/v1/entries — Juggluco pushes Nightscout-style JSON here:
 #   [{"type":"sgv","date":<epoch ms>,"sgv":<value>}, ...]   (single object also accepted)
-# shortcut: only the "sgv" and "date" fields are parsed until the real-payload check (O7)
-# confirms Juggluco's exact fields; unreadable bodies are kept in payload_log meanwhile.
+# Fields verified against live Juggluco uploads (O7, 2026-10-24); unreadable bodies land in payload_log.
 sub entries ($self) {
   my $db  = $self->app->pg->db;
   my $uid = $self->_uid($db);
@@ -67,9 +66,11 @@ sub entries ($self) {
       $rejected++;
       next;
     }
-    # epoch is in ms (Nightscout format); UNIQUE (user_id, ts, source_type) dedups overlapping scans
+    # epoch is in ms (Nightscout format); UNIQUE (user_id, ts, source_type) dedups overlapping scans.
+    # Uploader pushes Bluetooth stream values (Libre 2/2+/3), 1-minute interval (§3).
     $inserted += $db->query(
-      'INSERT INTO readings (user_id, ts, mg_dl, raw) VALUES (?, to_timestamp(?), ?, ?::jsonb)
+      'INSERT INTO readings (user_id, ts, mg_dl, source_type, source_interval, raw)
+         VALUES (?, to_timestamp(?), ?, \'stream\', 1, ?::jsonb)
          ON CONFLICT (user_id, ts, source_type) DO NOTHING',
       $uid, $ts / 1000, $mgdl, encode_json($item)
     )->rows;
