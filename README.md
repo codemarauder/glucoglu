@@ -49,6 +49,18 @@ Get your ingest token from the dashboard, then point Juggluco's upload at:
 
 Nightscout-style JSON (`{"type":"sgv","date":<epoch ms>,"sgv":<value>}`, single object or array). Values are auto-detected as mg/dL or mmol/L and stored as mg/dL; duplicate readings are ignored. Unreadable payloads are kept in `payload_log` for diagnosis. Auth: token as query parameter, `Authorization: Bearer` (V3), or `api-secret: <sha1 of token>` header (V1, Juggluco's default).
 
+**Note:** Juggluco's uploader only pushes Bluetooth stream values (Libre 2/2+/3). Libre 1 sensors are NFC-only — their scans and history never reach the uploader. For Libre 1, use the mirror pipeline:
+
+    # 1. Juggluco server (cmdline) on any host, configured as mirror receiver
+    ./juggluco -riP -L <label> -w <password> -G && ./juggluco    # daemon
+    # 2. Phone: Mirror -> Add connection -> your host, port 8795, Scans (+Amounts)
+    # 3. Cron: export TSVs from the same data dir and import
+    ./juggluco -H history.tsv && ./juggluco -S scans.tsv
+    script/glucoglu-admin import history history.tsv EMAIL
+    script/glucoglu-admin import spot scans.tsv EMAIL
+
+Re-running the import is safe — duplicate readings are ignored. History is the main data (~96 points/day at 15-min intervals); spot values are a bonus.
+
 ## Deploy (Debian 12)
 
 The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.g. Apache) owns TLS on 443 and proxies to hypnotoad on `127.0.0.1:3000`.

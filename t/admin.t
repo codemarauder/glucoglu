@@ -1,4 +1,5 @@
 use Mojo::Base -strict, -signatures;
+use File::Temp 'tempfile';
 
 use Test::More;
 plan skip_all => 'set GLUCOGLU_DB_DSN to a throwaway Postgres DSN (e.g. postgresql://glucoglu:pass@localhost/glucoglu_test)'
@@ -50,6 +51,33 @@ subtest 'login link works without mail' => sub {
   ok $code, 'prints a login link';
   $t->get_ok("/auth/$code")->status_is(302);
   $t->get_ok('/dashboard')->status_is(200);
+}, $one;
+
+subtest 'TSV import (Libre 1 mirror path)' => sub {
+  my ($fh, $file) = tempfile(UNLINK => 1, SUFFIX => '.tsv');
+  print $fh "Sensorid\tnr\tUnixTime\tYYYY-mm-ddTHH:MM:SS\tTZ\tMin\tmg/dL\n";
+  print $fh join("\t", qw(3MH01DZF38H 4 1764253834 2025-11-27T20:00:34 5.5 60 147)), "\n";
+  print $fh join("\t", qw(3MH01DZF38H 5 1764254741 2025-11-27T20:15:41 5.5 75 7.8)), "\n";   # mmol/L value
+  print $fh join("\t", qw(3MH01DZF38H 6 1764256553 2025-11-27T20:30:47 5.5 90 30)),  "\n";   # between unit ranges
+  print $fh join("\t", qw(0M000Y36FAR 7 1792847053 2026-10-24T18:34:13 5.5 1635 244)), "\n";
+  close $fh;
+
+  my $out = qx{$^X script/glucoglu-admin import history $file 'imp\@b.co' 2>&1};
+  ok !$?, 'import exits 0';
+  like $out, qr/imported 3 history readings/, '3 of 4 rows inserted, header skipped';
+  is $one->('SELECT count(*) FROM readings'), 3, 'between-range value rejected';
+  ok abs($one->('SELECT mg_dl FROM readings WHERE ts = to_timestamp(1764254741)') - 7.8 * 18.018) < 0.01,
+    'mmol/L converted to mg/dL';
+  is $one->("SELECT source_type FROM readings WHERE ts = to_timestamp(1764253834)"), 'history', 'source_type history';
+  is $one->("SELECT raw->>'sensor' FROM readings"), '3MH01DZF38H', 'raw keeps the sensor id';
+
+  $out = qx{$^X script/glucoglu-admin import history $file 'imp\@b.co' 2>&1};
+  like $out, qr/imported 0 history readings.*3 duplicates/, 're-run inserts nothing';
+  is $one->('SELECT count(*) FROM readings'), 3, 'idempotent';
+
+  $out = qx{$^X script/glucoglu-admin import spot $file 'imp\@b.co' 2>&1};
+  like $out, qr/imported 3 spot readings/, 'spot coexists with history at same timestamps';
+  is $one->('SELECT count(*) FROM readings'), 6, 'history + spot both stored';
 }, $one;
 
 subtest 'unknown command fails' => sub {

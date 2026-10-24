@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 use Mojo::Base -strict, -signatures;
 use Mojo::Pg;
+use Mojo::JSON 'encode_json';
 use Mojo::Util 'md5_sum';
 use Digest::SHA 'sha256_hex';
 
@@ -55,6 +56,37 @@ elsif ($cmd eq 'login') {
   my $base = $ENV{GLUCOGLU_URL} || 'http://localhost:3000';
   print "login link (valid 10 minutes):\n$base/auth/$code\n";
 }
+elsif ($cmd eq 'import') {
+  # Libre 1 path: Juggluco mirror receiver -> "juggluco -S/-H file" TSV export -> this import (cron).
+  # Columns: Sensorid nr UnixTime ISO TZ Min mg/dL [Rate ChangeLabel]. Re-running is safe: dupes are ignored.
+  my ($type, $file, $email) = @args;
+  die "usage: glucoglu-admin import (history|spot) FILE EMAIL\n"
+    unless defined($type) && defined($file) && defined($email) && $type =~ /^(history|spot)$/;
+  my $db = $pg->db;
+  $db->query('INSERT INTO users (email, api_token) VALUES (?, ?) ON CONFLICT (email) DO NOTHING',
+    $email, substr(md5_sum(rand() . $$ . time), 0, 20));
+  my $uid = $db->query('SELECT id FROM users WHERE email = ?', $email)->arrays->[0][0]
+    or die "no such user: $email\n";
+  open my $fh, '<', $file or die "cannot open $file: $!\n";
+  my ($inserted, $dupes, $rejected) = (0, 0, 0);
+  while (my $line = <$fh>) {
+    my @c = split /\t/, $line;
+    next unless @c >= 7 && ($c[2] // '') =~ /^\d+$/ && ($c[6] // '') =~ /^\d+(\.\d+)?$/;   # header/noise lines
+    my ($ts, $value) = ($c[2], $c[6]);
+    my $mgdl = $value <= 27.8 ? $value * 18.018 : $value >= 40 ? $value : undef;           # unit rule D11
+    if (!defined $mgdl) { $rejected++; next }
+    my $rows = $db->query(
+      'INSERT INTO readings (user_id, ts, mg_dl, source_type, source_interval, raw)
+         VALUES (?, to_timestamp(?), ?, ?, ?, ?::jsonb)
+         ON CONFLICT (user_id, ts, source_type) DO NOTHING',
+      $uid, $ts, $mgdl, $type,
+      $type eq 'history' ? 15 : 0,
+      encode_json({sensor => $c[0], id => $c[1] + 0, min => $c[5] + 0})
+    )->rows;
+    $rows ? $inserted++ : $dupes++;
+  }
+  print "imported $inserted $type readings for $email ($dupes duplicates, $rejected rejected)\n";
+}
 else { die usage() }
 
 sub usage {
@@ -64,5 +96,6 @@ sub usage {
   delete EMAIL    delete a user (tokens cascade, mail log cleaned)
   prune           delete expired login tokens and mail_log over 30 days
   login EMAIL     mint a login link without mail (dev / mailbox recovery)
+  import TYPE FILE EMAIL   import Juggluco mirror TSV (TYPE: history|spot); repeat runs are safe
 ";
 }

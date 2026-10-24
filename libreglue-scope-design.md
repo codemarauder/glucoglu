@@ -102,13 +102,15 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
 
 ## 4. Ingestion Pipeline
 
-1.  Juggluco POSTs raw JSON to `/api/v1/entries` on every NFC scan [1].
+1.  Libre 2/2+/3 (Bluetooth stream): Juggluco's Nightscout uploader POSTs to `/api/v1/entries` (V1: `api-secret` header; V3: `/api/v2/authorization/request` handshake + Bearer). Verified against Juggluco source and live data (O7): Nightscout-style JSON, `sgv` + `date` epoch ms.
     
-2.  PostgreSQL ingests historical blocks and spot scans. The UNIQUE constraint on (user ID, timestamp, source type) ignores overlapping timestamps from sequential scans within the same 8-hour window [1].
+2.  Libre 1 (NFC only): Juggluco's uploader pushes stream values ONLY — scans and history are never uploaded (upstream gap). Path: Juggluco mirror → Juggluco cmdline server (receiver) → `-H`/`-S` TSV exports → `glucoglu-admin import history|spot` (cron). Re-imports are safe (dedup).
     
-3.  Juggluco also sends: meal marks (Amount field [1]), insulin doses, IOB, exercise marks, notes.
+3.  PostgreSQL ingests historical blocks and spot scans. The UNIQUE constraint on (user ID, timestamp, source type) ignores overlapping timestamps from sequential scans within the same 8-hour window [1].
     
-4.  **Verify before build:** capture one real Juggluco payload. Confirm exact JSON field names. Enable meal + insulin + IOB + exercise in Juggluco settings.
+4.  Juggluco also sends: meal marks (Amount field [1]), insulin doses, IOB, exercise marks, notes — via treatments (uploader) and amounts (mirror; `-N` export).
+    
+5.  ~~Verify before build: capture one real Juggluco payload.~~ Done (O7 resolved): payload format and TSV formats confirmed against live data, 2026-10-24.
     
 
 * * *
@@ -277,7 +279,7 @@ These gaps are the product differentiation.
 | O4 | PP baseline window | Resolved: 30-min pre-meal mean |
 | O5 | Email verification | Resolved by design (D9): the first working code proves the mailbox |
 | O6 | Data export / deletion | Resolved (D12): CSV + browser PDF (PWA print stylesheet) in v1; right-to-delete at the storage layer; scheduled/emailed reports in v2 via headless Chromium (not Selenium) |
-| O7 | Juggluco JSON field names | OPEN — capture a real payload at build step 2, before schema freeze |
+| O7 | Juggluco JSON field names | Resolved (2026-10-24): Nightscout-style (`type`,`date` ms,`sgv`), confirmed against live uploads; TSV export formats confirmed for the mirror path |
 | O8 | IDF 140 mg/dL target | Resolved as display guidance: T2D-oriented; individualize; do not apply blindly |
 
 * * *
