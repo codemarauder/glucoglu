@@ -83,6 +83,10 @@ subtest 'TSV import (Libre 1 mirror path)' => sub {
 subtest 'unknown command fails' => sub {
   $admin->('bogus');
   ok $?, 'non-zero exit';
+  my $out = qx{$^X script/glucoglu-admin 2>&1};
+  ok $?, 'no arguments: non-zero exit';
+  unlike $out, qr/uninitialized/, 'no warnings without arguments';
+  like $out, qr/usage: glucoglu-admin COMMAND/, 'usage shown';
 }, $one;
 
 done_testing();
