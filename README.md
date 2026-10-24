@@ -40,6 +40,14 @@ Run on the server with the app's environment (`GLUCOGLU_DB_DSN`). No web admin i
 
 Cron the `prune` (e.g. daily). 
 
+## Juggluco ingestion
+
+Get your ingest token from the dashboard, then point Juggluco's upload at:
+
+    POST /api/v1/entries?token=YOUR_TOKEN
+
+Nightscout-style JSON (`{"type":"sgv","date":<epoch ms>,"sgv":<value>}`, single object or array). Values are auto-detected as mg/dL or mmol/L and stored as mg/dL; duplicate readings are ignored. Unreadable payloads are kept in `payload_log` for diagnosis.
+
 ## Deploy (Debian 12)
 
 The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.g. Apache) owns TLS on 443 and proxies to hypnotoad on `127.0.0.1:3000`.

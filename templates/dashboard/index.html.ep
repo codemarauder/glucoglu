@@ -1,7 +1,15 @@
 % layout 'default';
 % title 'Dashboard';
-<h2>Nothing here yet</h2>
-<p>Your glucose readings will appear here after build step 2 &mdash; the Juggluco ingest endpoint.</p>
+<h2>Ingest</h2>
+<p>Point Juggluco at <code><%= url_for('/api/v1/entries')->to_abs %></code><br>
+with token <code><%= $token %></code> (query parameter <code>?token=</code> or <code>Authorization: Bearer</code>).</p>
+<p><%= $count %> reading<%= $count == 1 ? '' : 's' %> stored so far.</p>
+<form method="post" action="/dashboard/token">
+  <button class="link">Regenerate ingest token</button>
+</form>
+% if (my $notice = flash 'notice') {
+<p class="notice"><%= $notice %></p>
+% }
 <form method="post" action="/logout">
   <button class="link">Log out</button>
 </form>

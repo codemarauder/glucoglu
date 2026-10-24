@@ -3,8 +3,6 @@ use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use Digest::SHA qw(sha256_hex);
 
-# Codes use the alphabet without I, O, 0, 1 so that humans cannot misread them.
-my @ALPHABET = ('A' .. 'H', 'J' .. 'N', 'P' .. 'Z', 2 .. 9);
 my $RATE_LIMIT = 5;    # login mails per email address per hour
 my $TTL        = '10 minutes';
 
@@ -45,10 +43,11 @@ sub request ($self) {
       $invite
     )->array;
     return $self->render('auth/login', error => 'That invite code is not valid.') unless $used;
-    $uid = $db->query('INSERT INTO users (email) VALUES (?) RETURNING id', $email)->arrays->[0][0];
+    $uid = $db->query('INSERT INTO users (email, api_token) VALUES (?, ?) RETURNING id',
+      $email, $self->gen_token)->arrays->[0][0];
   }
 
-  my $code = _gen_code();
+  my $code = $self->_gen_code;
   my $norm = $code =~ s/-//gr;    # verify strips separators; hash the same normalized form
   my $url  = $self->app->config->{base_url} . "/auth/" . $code;
   $db->query(
@@ -92,8 +91,8 @@ sub logout ($self) {
   $self->redirect_to('login');
 }
 
-sub _gen_code () {
-  my $s = join '', map { $ALPHABET[int rand @ALPHABET] } 1 .. 10;
+sub _gen_code ($self) {
+  my $s = $self->gen_token(10);
   return substr($s, 0, 5) . '-' . substr($s, 5);
 }
 
