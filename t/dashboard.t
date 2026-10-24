@@ -50,6 +50,26 @@ subtest 'dashboard with data' => sub {
   $t->get_ok('/dashboard?days=99')->status_is(200)->content_like(qr{percentiles by time of day}, 'invalid window falls back');
 };
 
+subtest 'day paging on the Today graph' => sub {
+  my $uid = $db->query("SELECT id FROM users WHERE email = 'a\@b.co'")->array->[0];
+  $db->query('INSERT INTO readings (user_id, ts, mg_dl, source_type, raw) VALUES (?, to_timestamp(?), 155, \'spot\', \'{}\')',
+    $uid, time - 2 * 86400);    # spot: shows in the daily trace, not in the metrics
+
+  $t->get_ok('/dashboard?day=2')->status_is(200)
+    ->content_like(qr{Today's glucose trace}s, 'two days back has its own trace')
+    ->content_unlike(qr{today-current}, 'current value only on day 0')
+    ->content_like(qr{title="next day"}, 'forward nav offered');
+  $t->get_ok('/dashboard?day=1')->status_is(200)->content_like(qr{No readings for this day});
+  $t->get_ok('/dashboard?day=999')->status_is(200)->content_like(qr{today-current}, 'out-of-range day falls back to today');
+};
+
+subtest 'settings holds ingest and account' => sub {
+  $t->get_ok('/dashboard/settings')->status_is(200)
+    ->content_like(qr{Regenerate ingest token})->content_like(qr{Log out})
+    ->content_like(qr{api/v1/entries});
+  $t->get_ok('/dashboard')->content_unlike(qr{Regenerate ingest token}, 'dashboard no longer shows ingest');
+};
+
 subtest 'D10: no data without ownership or grant' => sub {
   my $other = $db->query("INSERT INTO users (email) VALUES ('x\@y.co') RETURNING id")->array->[0];
   $t->get_ok("/dashboard?user_id=$other")->status_is(404, 'foreign dashboard does not exist for me');

@@ -40,6 +40,7 @@ sub startup ($self) {
 
   my $dash = $r->under('/dashboard')->to('auth#guard');
   $dash->get('/')->to('dashboard#index')->name('dashboard');
+  $dash->get('/settings')->to('dashboard#settings')->name('settings');
   $dash->post('/token')->to('dashboard#regenerate_token');
 }
 

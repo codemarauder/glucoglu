@@ -41,14 +41,18 @@ sub index ($self) {
   my $off = tz_offset($user->{tz});
   my $svg = @$rows ? agp_svg(agp($rows, $off)) : '';
 
-  # Today view (§6): all sources since local midnight — spot values belong in the daily trace
+  # Today view (§6): all sources for the paged day — spot values belong in the daily trace.
+  # ?day=N pages back N local days from today (0 = today).
+  my $day  = $self->param('day') // 0;
+  $day = 0 unless $day =~ /^\d+$/ && $day <= 90;
   my $now      = time;
-  my $midnight = floor(($now + $off) / 86400) * 86400 - $off;
+  my $midnight = floor(($now + $off) / 86400) * 86400 - $off - $day * 86400;
   my $today    = $db->query(
     'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl, source_type FROM readings
-       WHERE user_id = ? AND ts >= to_timestamp(?) ORDER BY ts', $target, $midnight
+       WHERE user_id = ? AND ts >= to_timestamp(?) AND ts < to_timestamp(?) ORDER BY ts',
+    $target, $midnight, $midnight + 86400
   )->hashes->to_array;
-  my $dlt       = @$today ? deltas($today, $now) : undef;
+  my $dlt       = $day == 0 && @$today ? deltas($today, $now) : undef;
   my $today_svg = @$today ? today_svg($today, $off) : '';
 
   # Traffic-light bands (Battelino 2019 Table 2): target / partial / off-target per metric
@@ -73,6 +77,19 @@ sub index ($self) {
     latest_local => $latest ? strftime('%Y-%m-%d %H:%M', gmtime($latest->{ts} + $off)) : undef,
     dlt          => $dlt,
     today_svg    => $today_svg,
+    day          => $day,
+    day_label    => strftime('%a %d %b', gmtime($midnight + $off)),
+  );
+}
+
+# Settings: session user only — a caregiver with a shares grant must never see the ingest token.
+sub settings ($self) {
+  my $uid  = $self->session('user_id');
+  my $db   = $self->app->pg->db;
+  my $user = $db->query('SELECT api_token FROM users WHERE id = ?', $uid)->hash;
+  $self->render(
+    token => $user->{api_token},
+    count => $db->query('SELECT count(*) FROM readings WHERE user_id = ?', $uid)->arrays->[0][0],
   );
 }
 
@@ -80,7 +97,7 @@ sub regenerate_token ($self) {
   $self->app->pg->db->query('UPDATE users SET api_token = ? WHERE id = ?',
     $self->gen_token, $self->session('user_id'));
   $self->flash(notice => 'Ingest token regenerated. Update Juggluco.');
-  $self->redirect_to('dashboard');
+  $self->redirect_to('settings');
 }
 
 1;
