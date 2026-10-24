@@ -8,7 +8,7 @@
   <meta name="color-scheme" content="light dark">
 </head>
 <body>
-<main>
+<main class="<%= stash('wide') ? 'wide' : '' %>">
   <header>
     <h1>Glucoglu</h1>
     <p class="tagline">the glue for your glucose data from Juggluco</p>

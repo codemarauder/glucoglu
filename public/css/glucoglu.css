@@ -10,6 +10,8 @@ body {
   justify-content: center;
 }
 main { width: min(92vw, 24rem); padding: 2rem 0; text-align: center; }
+main.wide { width: min(94vw, 60rem); text-align: left; }
+main.wide h2 { text-align: center; }
 h1 { margin: 0; letter-spacing: .02em; }
 h2 { margin-top: 0; }
 .tagline { margin: .2rem 0 1.5rem; opacity: .7; font-size: .9rem; }
@@ -49,3 +51,11 @@ button.link { background: none; color: #1670a0; padding: .3rem 0; }
   font-size: .9rem;
 }
 .hint { opacity: .7; font-size: .85rem; }
+svg { width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; }
+td { padding: .45rem .6rem; }
+/* Traffic-light bands (Battelino 2019 Table 2): translucent to survive light and dark mode */
+tr.good td { background: rgba(40, 167, 69, 0.14); }
+tr.warn td { background: rgba(255, 193, 7, 0.14); }
+tr.bad  td { background: rgba(220, 53, 69, 0.12); }
+.notice { background: rgba(22, 112, 160, 0.12); padding: .6rem .9rem; border-radius: 8px; font-size: .9rem; }

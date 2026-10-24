@@ -1,4 +1,5 @@
 % layout 'default';
+% stash wide => 1;
 % title 'Dashboard';
 % if (my $notice = flash 'notice') {
 <p class="notice"><%= $notice %></p>
@@ -32,15 +33,16 @@ with token <code><%= $token %></code> (<code>?token=</code> or <code>Authorizati
 % if ($m->{n}) {
 <h2>Tier 1 <span class="hint"><%= $m->{n} %> readings, <%= sprintf('%.0f', $m->{sufficiency}) %>% data sufficiency</span></h2>
 <table>
-  <tr><td>Time in range 70–180</td><td><strong><%= sprintf('%.1f', $m->{tir}) %>%</strong></td><td class="hint">target &gt; 70%</td></tr>
-  <tr><td>Time above 180 / 250</td><td><%= sprintf('%.1f', $m->{tar180}) %>% / <%= sprintf('%.1f', $m->{tar250}) %>%</td><td class="hint">&lt; 25% / &lt; 5%</td></tr>
-  <tr><td>Time below 70 / 54</td><td><%= sprintf('%.1f', $m->{tbr70}) %>% / <%= sprintf('%.1f', $m->{tbr54}) %>%</td><td class="hint">&lt; 4% / &lt; 1%</td></tr>
+  <tr class="<%= $g->{tir} %>"><td>Time in range 70–180</td><td><strong><%= sprintf('%.1f', $m->{tir}) %>%</strong></td><td class="hint">target &gt; 70%</td></tr>
+  <tr class="<%= $g->{tar180} %>"><td>Time above 180 / 250</td><td><%= sprintf('%.1f', $m->{tar180}) %>% / <%= sprintf('%.1f', $m->{tar250}) %>%</td><td class="hint">&lt; 25% / &lt; 5%</td></tr>
+  <tr class="<%= $g->{tbr70} %>"><td>Time below 70 / 54</td><td><%= sprintf('%.1f', $m->{tbr70}) %>% / <%= sprintf('%.1f', $m->{tbr54}) %>%</td><td class="hint">&lt; 4% / &lt; 1%</td></tr>
   <tr><td>Mean glucose</td><td><%= sprintf('%.0f', $m->{mean}) %> mg/dL</td></tr>
-  <tr><td>SD / CV</td><td><%= sprintf('%.1f', $m->{sd}) %> / <%= sprintf('%.1f', $m->{cv}) %>%</td><td class="hint">CV ≤ 36%</td></tr>
+  <tr class="<%= $g->{cv} %>"><td>SD / CV</td><td><%= sprintf('%.1f', $m->{sd}) %> / <%= sprintf('%.1f', $m->{cv}) %>%</td><td class="hint">CV ≤ 36%</td></tr>
   <tr><td>GMI</td><td><%= sprintf('%.1f', $m->{gmi}) %>%</td><td class="hint">eA1c (ADAG): <%= sprintf('%.1f', $m->{ea1c}) %>%</td></tr>
   <tr><td>Hypo events (L1 / L2)</td><td><%= $m->{events}{l1} %> / <%= $m->{events}{l2} %></td><td class="hint">≥15 min; extended &gt;120 min: <%= $m->{events}{ext_hypo} %></td></tr>
   <tr><td>Hyper events &gt;250</td><td><%= $m->{events}{hyper} %></td><td class="hint">extended ≥90 min: <%= $m->{events}{ext_hyper} %></td></tr>
 </table>
+<p class="hint">Row shading — green: at target, amber: partial, red: off-target (Battelino 2019, Table 2).</p>
 % }
 
 <form method="post" action="/dashboard/token">

@@ -41,10 +41,21 @@ sub index ($self) {
   my $off = tz_offset($user->{tz});
   my $svg = @$rows ? agp_svg(agp($rows, $off)) : '';
 
+  # Traffic-light bands (Battelino 2019 Table 2): target / partial / off-target per metric
+  my %grade = $m->{n} ? (
+    tir    => $m->{tir}    > 70   ? 'good' : $m->{tir}    >= 50  ? 'warn' : 'bad',
+    tar180 => $m->{tar180} < 25   ? 'good' : $m->{tar180} <= 50  ? 'warn' : 'bad',
+    tar250 => $m->{tar250} < 5    ? 'good' : $m->{tar250} <= 10  ? 'warn' : 'bad',
+    tbr70  => $m->{tbr70}  < 4    ? 'good' : $m->{tbr70}  <= 10  ? 'warn' : 'bad',
+    tbr54  => $m->{tbr54}  < 1    ? 'good' : $m->{tbr54}  <= 2   ? 'warn' : 'bad',
+    cv     => $m->{cv}     <= 36   ? 'good' : $m->{cv}     <= 50  ? 'warn' : 'bad',
+  ) : ();
+
   $self->render(
     token        => $user->{api_token},
     count        => $count,
     m            => $m,
+    g            => \%grade,
     svg          => $svg,
     days         => $days,
     target       => $target,

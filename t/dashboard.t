@@ -43,7 +43,8 @@ subtest 'dashboard with data' => sub {
 
   $t->get_ok('/dashboard')->status_is(200)
     ->content_like(qr{Time in range 70\x{2013}180})->content_like(qr{50\.0%})
-    ->content_like(qr{<svg.*percentiles}s)->content_like(qr{999 mg/dL});
+    ->content_like(qr{<svg.*percentiles}s)->content_like(qr{999 mg/dL})
+    ->content_like(qr{main class="wide"})->content_like(qr{class="warn"});
   $t->get_ok('/dashboard?days=90')->status_is(200)->content_like(qr{percentiles by time of day});
   $t->get_ok('/dashboard?days=99')->status_is(200)->content_like(qr{percentiles by time of day}, 'invalid window falls back');
 };
