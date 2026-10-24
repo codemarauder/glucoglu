@@ -2,6 +2,7 @@
 use Mojo::Base -strict, -signatures;
 use Mojo::Pg;
 use Mojo::Util 'md5_sum';
+use Digest::SHA 'sha256_hex';
 
 # Operator maintenance. Run on the server with the app's environment
 # (GLUCOGLU_DB_DSN). No web admin in v1; this is the admin panel.
@@ -36,6 +37,24 @@ elsif ($cmd eq 'prune') {
   my $mail = $db->query("DELETE FROM mail_log WHERE created_at < now() - interval '30 days'")->rows;
   print "pruned $tokens expired tokens, $mail mail_log rows over 30 days\n";
 }
+elsif ($cmd eq 'login') {
+  # Mint a login link without going through mail. Same trust level as SQL access.
+  # Used for dev (no SMTP) and for "user lost their mailbox" recovery.
+  my ($email) = @args;
+  die "usage: glucoglu-admin login EMAIL\n" unless $email;
+  my $db = $pg->db;
+  $db->query('INSERT INTO users (email, api_token) VALUES (?, ?) ON CONFLICT (email) DO NOTHING',
+    $email, substr(md5_sum(rand() . $$ . time), 0, 20));
+  my $uid = $db->query('SELECT id FROM users WHERE email = ?', $email)->arrays->[0][0]
+    or die "no such user: $email\n";
+  my @ALPHA   = ('A' .. 'H', 'J' .. 'N', 'P' .. 'Z', 2 .. 9);    # same alphabet as the mailed codes
+  my $raw     = join '', map { $ALPHA[int rand @ALPHA] } 1 .. 10;
+  my $code    = substr($raw, 0, 5) . '-' . substr($raw, 5);
+  $db->query("INSERT INTO login_tokens (code, user_id, expires_at) VALUES (?, ?, now() + interval '10 minutes')",
+    sha256_hex($raw), $uid);    # the app hashes the dash-stripped code
+  my $base = $ENV{GLUCOGLU_URL} || 'http://localhost:3000';
+  print "login link (valid 10 minutes):\n$base/auth/$code\n";
+}
 else { die usage() }
 
 sub usage {
@@ -44,5 +63,6 @@ sub usage {
   users           list users
   delete EMAIL    delete a user (tokens cascade, mail log cleaned)
   prune           delete expired login tokens and mail_log over 30 days
+  login EMAIL     mint a login link without mail (dev / mailbox recovery)
 ";
 }

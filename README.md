@@ -36,7 +36,8 @@ Run on the server with the app's environment (`GLUCOGLU_DB_DSN`). No web admin i
     script/glucoglu-admin invite            # mint an invite code
     script/glucoglu-admin users             # list users
     script/glucoglu-admin delete EMAIL      # delete a user and their tokens/mail log
-    script/glucoglu-admin prune             # drop expired login tokens and old mail log
+    script/glucoglu-admin login EMAIL     # login link without mail (dev / mailbox recovery)
+    script/glucoglu-admin prune           # drop expired login tokens and old mail log
 
 Cron the `prune` (e.g. daily). 
 

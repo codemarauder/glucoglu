@@ -43,6 +43,15 @@ subtest 'prune drops expired tokens and old mail log' => sub {
   is $one->("SELECT count(*) FROM mail_log"), 1, 'old mail pruned, recent kept';
 }, $one;
 
+subtest 'login link works without mail' => sub {
+  my $out = qx{$^X script/glucoglu-admin login 'dev\@b.co' 2>&1};
+  ok !$?, 'login exits 0';
+  my ($code) = $out =~ m{/auth/([A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5})};
+  ok $code, 'prints a login link';
+  $t->get_ok("/auth/$code")->status_is(302);
+  $t->get_ok('/dashboard')->status_is(200);
+}, $one;
+
 subtest 'unknown command fails' => sub {
   $admin->('bogus');
   ok $?, 'non-zero exit';
