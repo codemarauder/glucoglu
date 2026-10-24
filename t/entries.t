@@ -1,4 +1,5 @@
 use Mojo::Base -strict, -signatures;
+use Digest::SHA 'sha1_hex';
 
 use Test::More;
 plan skip_all => 'set GLUCOGLU_DB_DSN to a throwaway Postgres DSN (e.g. postgresql://glucoglu:pass@localhost/glucoglu_test)'
@@ -61,6 +62,15 @@ subtest 'Nightscout V3 handshake (Juggluco test V3)' => sub {
       json => [{type => 'sgv', date => 1730004000000, sgv => 118}])
     ->status_is(200)->json_is('/inserted' => 1);
   is $one->('SELECT count(*) FROM readings'), 5, 'v3 upload stored';
+}, $one;
+
+subtest 'Nightscout V1 api-secret header (Juggluco default)' => sub {
+  $t->post_ok('/api/v1/entries', {'api-secret' => sha1_hex('tok123')},
+      json => [{type => 'sgv', date => 1730005000000, sgv => 117}])
+    ->status_is(200)->json_is('/inserted' => 1);
+  $t->post_ok('/api/v1/entries', {'api-secret' => sha1_hex('WRONG')}, json => {sgv => 1})
+    ->status_is(401);
+  is $one->('SELECT count(*) FROM readings'), 6, 'v1 upload stored';
 }, $one;
 
 done_testing();

@@ -47,7 +47,7 @@ Get your ingest token from the dashboard, then point Juggluco's upload at:
 
     POST /api/v1/entries?token=YOUR_TOKEN
 
-Nightscout-style JSON (`{"type":"sgv","date":<epoch ms>,"sgv":<value>}`, single object or array). Values are auto-detected as mg/dL or mmol/L and stored as mg/dL; duplicate readings are ignored. Unreadable payloads are kept in `payload_log` for diagnosis.
+Nightscout-style JSON (`{"type":"sgv","date":<epoch ms>,"sgv":<value>}`, single object or array). Values are auto-detected as mg/dL or mmol/L and stored as mg/dL; duplicate readings are ignored. Unreadable payloads are kept in `payload_log` for diagnosis. Auth: token as query parameter, `Authorization: Bearer` (V3), or `api-secret: <sha1 of token>` header (V1, Juggluco's default).
 
 ## Deploy (Debian 12)
 

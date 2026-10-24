@@ -2,11 +2,28 @@ package Glucoglu::Controller::Api;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use Mojo::JSON 'encode_json';
+use Digest::SHA 'sha1_hex';
 
 # Unit rule (D11): <=27.8 is mmol/L, >=40 is mg/dL. Between is impossible in both ranges.
 my $MMOL_MAX  = 27.8;
 my $MGDL_MIN  = 40;
 my $MMOL_CONV = 18.018;
+
+# Resolve the ingest user: ?token= query, Authorization: Bearer (Nightscout V3),
+# or api-secret: sha1(token) header (Nightscout V1 — Juggluco's default mode).
+sub _uid ($self, $db) {
+  my ($bearer) = ($self->req->headers->authorization // '') =~ /^Bearer\s+(\S+)$/i;
+  my $token    = $self->param('token') // $bearer // '';
+  return $db->query('SELECT id FROM users WHERE api_token = ?', $token)->arrays->[0][0]
+    if length $token;
+  my $secret = lc($self->req->headers->header('api-secret') // '');
+  return undef unless length $secret;
+  # shortcut: linear scan is fine for invite-scale instances, index a secret column past a few hundred users
+  for my $row (@{$db->query('SELECT id, api_token FROM users')->arrays}) {
+    return $row->[0] if sha1_hex($row->[1]) eq $secret;
+  }
+  return undef;
+}
 
 # Nightscout V3 handshake (Juggluco "test V3"): GET /api/v2/authorization/request/<secret>
 # must answer {"token": ..., "exp": <unix seconds>}. We return the ingest token itself,
@@ -23,12 +40,8 @@ sub auth_request ($self) {
 # shortcut: only the "sgv" and "date" fields are parsed until the real-payload check (O7)
 # confirms Juggluco's exact fields; unreadable bodies are kept in payload_log meanwhile.
 sub entries ($self) {
-  my ($bearer) = ($self->req->headers->authorization // '') =~ /^Bearer\s+(\S+)$/i;
-  my $token    = $self->param('token') // $bearer // '';
-  return $self->render(json => {error => 'invalid token'}, status => 401) unless length $token;
-
   my $db  = $self->app->pg->db;
-  my $uid = $db->query('SELECT id FROM users WHERE api_token = ?', $token)->arrays->[0][0];
+  my $uid = $self->_uid($db);
   return $self->render(json => {error => 'invalid token'}, status => 401) unless $uid;
 
   my $json = $self->req->json;
