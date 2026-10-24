@@ -29,6 +29,17 @@ Tests need a throwaway database (they create and wipe rows):
     sudo -u postgres createdb -O glucoglu glucoglu_test
     GLUCOGLU_DB_DSN=postgresql://glucoglu:PASS@localhost/glucoglu_test prove -l t
 
+## Maintenance
+
+Run on the server with the app's environment (`GLUCOGLU_DB_DSN`). No web admin in v1; the operator is the admin.
+
+    script/glucoglu-admin invite            # mint an invite code
+    script/glucoglu-admin users             # list users
+    script/glucoglu-admin delete EMAIL      # delete a user and their tokens/mail log
+    script/glucoglu-admin prune             # drop expired login tokens and old mail log
+
+Cron the `prune` (e.g. daily). 
+
 ## Deploy (Debian 12)
 
 The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.g. Apache) owns TLS on 443 and proxies to hypnotoad on `127.0.0.1:3000`.

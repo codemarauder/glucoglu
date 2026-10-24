@@ -238,6 +238,8 @@ Unit pairs (mg/dL = mmol/L): 70 = 3.9, 54 = 3.0, 63 = 3.5, 140 = 7.8, 180 = 10.0
 *   Billing hooks/stubs in v1: account tier field, feature-flag stubs. No payment processing.
     
 *   Public VPS with TLS.
+
+*   Operator maintenance via `script/glucoglu-admin` CLI (invites, user list, right-to-delete, prune of expired tokens and old mail log). No web admin in v1; the operator is the admin.
     
 
 * * *

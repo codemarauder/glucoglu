@@ -1,0 +1,48 @@
+#!/usr/bin/env perl
+use Mojo::Base -strict, -signatures;
+use Mojo::Pg;
+use Mojo::Util 'md5_sum';
+
+# Operator maintenance. Run on the server with the app's environment
+# (GLUCOGLU_DB_DSN). No web admin in v1; this is the admin panel.
+
+my $dsn = $ENV{GLUCOGLU_DB_DSN}
+  or die "set GLUCOGLU_DB_DSN (e.g. postgresql://glucoglu:pass\@localhost/glucoglu)\n";
+my $pg = Mojo::Pg->new($dsn);
+
+my ($cmd, @args) = @ARGV;
+
+if ($cmd eq 'invite') {
+  my $code = $args[0] // 'GLU-' . substr(md5_sum(rand() . $$ . time), 0, 8);
+  $pg->db->query('INSERT INTO invites (code) VALUES (?)', $code);
+  print "invite code: $code\n";
+}
+elsif ($cmd eq 'users') {
+  printf "%5d  %-40s  %s\n", @$_
+    for @{$pg->db->query('SELECT id, email, created_at FROM users ORDER BY id')->arrays};
+}
+elsif ($cmd eq 'delete') {
+  my ($email) = @args;
+  die "usage: glucoglu-admin delete EMAIL\n" unless $email;
+  my $db = $pg->db;
+  my $n  = $db->query('DELETE FROM users WHERE email = ?', $email)->rows;
+  $db->query('DELETE FROM mail_log WHERE email = ?', $email);
+  print $n ? "deleted $email\n" : "no such user: $email\n";
+}
+elsif ($cmd eq 'prune') {
+  my $db     = $pg->db;
+  my $tokens = $db->query('DELETE FROM login_tokens WHERE expires_at < now()')->rows;
+  # mail_log kept 30 days for abuse checks; the rate limit only needs the last hour
+  my $mail = $db->query("DELETE FROM mail_log WHERE created_at < now() - interval '30 days'")->rows;
+  print "pruned $tokens expired tokens, $mail mail_log rows over 30 days\n";
+}
+else { die usage() }
+
+sub usage {
+  return "usage: glucoglu-admin COMMAND
+  invite [CODE]   mint an invite code (random if not given)
+  users           list users
+  delete EMAIL    delete a user (tokens cascade, mail log cleaned)
+  prune           delete expired login tokens and mail_log over 30 days
+";
+}
