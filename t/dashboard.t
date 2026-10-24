@@ -57,10 +57,13 @@ subtest 'day paging on the Today graph' => sub {
 
   $t->get_ok('/dashboard?day=2')->status_is(200)
     ->content_like(qr{Today's glucose trace}s, 'two days back has its own trace')
-    ->content_unlike(qr{today-current}, 'current value only on day 0')
+    ->content_like(qr{today-current}, 'current value still shows today (day 0) data')
     ->content_like(qr{title="next day"}, 'forward nav offered');
   $t->get_ok('/dashboard?day=1')->status_is(200)->content_like(qr{No readings for this day});
   $t->get_ok('/dashboard?day=999')->status_is(200)->content_like(qr{today-current}, 'out-of-range day falls back to today');
+  $t->get_ok('/dashboard')->status_is(200)
+    ->content_like(qr{<span class="sep">\|</span>}, 'AGP windows are pipe-separated')
+    ->content_like(qr{hint caption}, 'captions carry the right-align class');
 };
 
 subtest 'settings holds ingest and account' => sub {

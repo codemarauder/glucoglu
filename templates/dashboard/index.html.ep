@@ -5,7 +5,7 @@
 <p class="notice"><%= $notice %></p>
 % }
 <h2>Today <span class="hint">the 100 m race</span></h2>
-% if ($day == 0 && $dlt) {
+% if ($dlt) {
 % my $dd = sub { defined $_[0] ? sprintf('%+.0f', $_[0]) : '—' };
 <p class="today-head">
   <span class="today-current"><%= $latest->{mg_dl} %> <span class="today-unit">mg/dL</span></span>
@@ -15,6 +15,8 @@
 <p class="today-deltas">
   <strong>Δ1</strong> <%== $dd->($dlt->{d1}) %> mg/dL | <strong>Δ5</strong> <%== $dd->($dlt->{d5}) %> mg/dL | <strong>Δ15</strong> <%== $dd->($dlt->{d15}) %> mg/dL
 </p>
+% } else {
+<p>No readings today yet. Scan the sensor — data arrives with the next mirror sync.</p>
 % }
 <p class="daynav">
 % if ($day < 90) {
@@ -28,24 +30,28 @@
 </p>
 % if ($today_svg) {
 <%== $today_svg %>
-<p class="hint">Dots are NFC spot scans; green band = 70–180 target range; gaps = no data.</p>
+<p class="hint caption">Dots are NFC spot scans; green band = 70–180 target range; gaps = no data.</p>
 % } else {
 <p>No readings for this day.</p>
 % }
 
 <h2>AGP <span class="hint">the marathon — percentiles by time of day</span></h2>
-<p class="hint">
+<p class="winnav">
+% my $first = 1;
 % for my $d (7, 14, 30, 90) {
-  % if ($d == $days) {
+%   if ($first) { $first = 0 } else {
+ <span class="sep">|</span>
+%   }
+%   if ($d == $days) {
 <strong><%= $d %>d</strong>
-  % } else {
-<a href="<%= url_for->query(days => $d, user_id => $target) %>"><%= $d %>d</a>
-  % }
+%   } else {
+<a href="<%= url_for->query(days => $d, day => $day, user_id => $target) %>"><%= $d %>d</a>
+%   }
 % }
 </p>
 % if ($svg) {
 <%== $svg %>
-<p class="hint">Bands: 5–95% (light), 25–75% (dark), median line. Dashed guides at 70, 180, 250 mg/dL.</p>
+<p class="hint caption">Bands: 5–95% (light), 25–75% (dark), median line. Dashed guides at 70, 180, 250 mg/dL.</p>
 % } else {
 <p>No readings in the last <%= $days %> days.</p>
 % }
@@ -62,7 +68,7 @@
   <tr><td>Hypo events (L1 / L2)</td><td><%= $m->{events}{l1} %> / <%= $m->{events}{l2} %></td><td class="hint">≥15 min; extended &gt;120 min: <%= $m->{events}{ext_hypo} %></td></tr>
   <tr><td>Hyper events &gt;250</td><td><%= $m->{events}{hyper} %></td><td class="hint">extended ≥90 min: <%= $m->{events}{ext_hyper} %></td></tr>
 </table>
-<p class="hint">Row shading — green: at target, amber: partial, red: off-target (Battelino 2019, Table 2).</p>
+<p class="hint caption">Row shading — green: at target, amber: partial, red: off-target (Battelino 2019, Table 2).</p>
 % }
 
 <p class="hint"><%= $count %> reading<%= $count == 1 ? '' : 's' %> stored · <a href="<%= url_for('settings') %>">Settings</a></p>

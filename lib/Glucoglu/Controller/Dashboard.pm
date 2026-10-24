@@ -41,19 +41,24 @@ sub index ($self) {
   my $off = tz_offset($user->{tz});
   my $svg = @$rows ? agp_svg(agp($rows, $off)) : '';
 
-  # Today view (§6): all sources for the paged day — spot values belong in the daily trace.
-  # ?day=N pages back N local days from today (0 = today).
-  my $day  = $self->param('day') // 0;
-  $day = 0 unless $day =~ /^\d+$/ && $day <= 90;
+  # Today view (§6): current value and deltas always come from today's readings;
+  # only the graph pages back (?day=N), the rest of the card stays on "now".
   my $now      = time;
-  my $midnight = floor(($now + $off) / 86400) * 86400 - $off - $day * 86400;
+  my $midnight = floor(($now + $off) / 86400) * 86400 - $off;
   my $today    = $db->query(
     'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl, source_type FROM readings
-       WHERE user_id = ? AND ts >= to_timestamp(?) AND ts < to_timestamp(?) ORDER BY ts',
-    $target, $midnight, $midnight + 86400
+       WHERE user_id = ? AND ts >= to_timestamp(?) ORDER BY ts', $target, $midnight
   )->hashes->to_array;
-  my $dlt       = $day == 0 && @$today ? deltas($today, $now) : undef;
-  my $today_svg = @$today ? today_svg($today, $off) : '';
+  my $dlt       = @$today ? deltas($today, $now) : undef;
+
+  my $day  = $self->param('day') // 0;
+  $day = 0 unless $day =~ /^\d+$/ && $day <= 90;
+  my $dayrows = $day == 0 ? $today : $db->query(
+    'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl, source_type FROM readings
+       WHERE user_id = ? AND ts >= to_timestamp(?) AND ts < to_timestamp(?) ORDER BY ts',
+    $target, $midnight - $day * 86400, $midnight - $day * 86400 + 86400
+  )->hashes->to_array;
+  my $today_svg = @$dayrows ? today_svg($dayrows, $off) : '';
 
   # Traffic-light bands (Battelino 2019 Table 2): target / partial / off-target per metric
   my %grade = $m->{n} ? (
@@ -78,7 +83,7 @@ sub index ($self) {
     dlt          => $dlt,
     today_svg    => $today_svg,
     day          => $day,
-    day_label    => strftime('%a %d %b', gmtime($midnight + $off)),
+    day_label    => strftime('%a %d %b', gmtime($midnight - $day * 86400 + $off)),
   );
 }
 

@@ -68,3 +68,6 @@ tr.bad  td { background: rgba(220, 53, 69, 0.12); }
 .today-deltas { font-size: .95rem; opacity: .9; }
 .daynav { text-align: center; margin: .4rem 0; font-size: 1.05rem; }
 .daynav a { text-decoration: none; font-size: 1.6rem; padding: 0 .9rem; vertical-align: middle; }
+.winnav { text-align: center; margin: .4rem 0; font-size: .95rem; }
+.winnav .sep { opacity: .4; padding: 0 .8rem; }
+.caption { text-align: right; }
