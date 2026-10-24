@@ -1,0 +1,7 @@
+% layout 'default';
+% title 'Dashboard';
+<h2>Nothing here yet</h2>
+<p>Your glucose readings will appear here after build step 2 &mdash; the Juggluco ingest endpoint.</p>
+<form method="post" action="/logout">
+  <button class="link">Log out</button>
+</form>

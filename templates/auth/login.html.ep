@@ -1,0 +1,12 @@
+% layout 'default';
+% title 'Log in';
+<form method="post" action="<%= url_for %>">
+  <label>Email
+    <input type="email" name="email" required autofocus>
+  </label>
+  <label>Invite code <span class="hint">(first login only)</span>
+    <input name="invite" autocomplete="off">
+  </label>
+  <button>Send login code</button>
+</form>
+<p class="hint">We send one link and one code to your address. No password.</p>

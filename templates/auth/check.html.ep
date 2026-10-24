@@ -1,0 +1,8 @@
+% layout 'default';
+% title 'Check your mail';
+<p>We sent a link and a code to <b><%= flash 'sent_to' %></b>.</p>
+<p>Open the link &mdash; or type the code here:</p>
+<form method="post" action="<%= url_for %>">
+  <input name="code" placeholder="XXXXX-XXXXX" autocomplete="off" autofocus>
+  <button>Log in</button>
+</form>

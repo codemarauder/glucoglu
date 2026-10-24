@@ -1,0 +1,6 @@
+*.log
+/hypnotoad.pid
+*.swp
+/local
+/AGENTS.local.md
+.env

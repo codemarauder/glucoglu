@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= stash 'title' || 'Glucoglu' %></title>
+  <link rel="stylesheet" href="/css/glucoglu.css">
+  <meta name="color-scheme" content="light dark">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Glucoglu</h1>
+    <p class="tagline">the glue for your glucose data from Juggluco</p>
+  </header>
+  <div class="card">
+% my $error = stash('error') // flash 'error';
+% if ($error) {
+    <div class="error"><%= $error %></div>
+% }
+    <%= content %>
+  </div>
+</main>
+</body>
+</html>
