@@ -49,7 +49,14 @@ sub index ($self) {
     'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl, source_type FROM readings
        WHERE user_id = ? AND ts >= to_timestamp(?) ORDER BY ts', $target, $midnight
   )->hashes->to_array;
-  my $dlt       = @$today ? deltas($today, $now) : undef;
+
+  # Deltas look back 30 min past midnight, so Δ15 still works just after 00:00.
+  # The graph keeps $today (midnight onward).
+  my $recent = $db->query(
+    'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl FROM readings
+       WHERE user_id = ? AND ts >= to_timestamp(?) ORDER BY ts', $target, $midnight - 1800
+  )->hashes->to_array;
+  my $dlt = @$recent ? deltas($recent, $now) : undef;
 
   my $day  = $self->param('day') // 0;
   $day = 0 unless $day =~ /^\d+$/ && $day <= 90;

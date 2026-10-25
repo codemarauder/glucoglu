@@ -1,6 +1,10 @@
 use Mojo::Base -strict, -signatures;
 
 use Test::More;
+
+# A shiftable clock for the whole process. Must be installed before the app is compiled.
+BEGIN { $main::CLOCK = 0; *CORE::GLOBAL::time = sub :prototype() { CORE::time() + $main::CLOCK } }
+
 plan skip_all => 'set GLUCOGLU_DB_DSN to a throwaway Postgres DSN (e.g. postgresql://glucoglu:pass@localhost/glucoglu_test)'
   unless $ENV{GLUCOGLU_DB_DSN};
 
@@ -20,9 +24,9 @@ $db->query(
   'TRUNCATE shares, lab_a1c, notes, exercise, iob, insulin, meals, payload_log, readings, login_tokens, mail_log, users, invites');
 $db->query("INSERT INTO invites (code) VALUES ('TEST01')");
 
-sub _login ($t) {
+sub _login ($t, $email = 'a@b.co', $invite = 'TEST01') {
   $t->ua->max_redirects(0);
-  $t->post_ok('/login' => form => {email => 'a@b.co', invite => 'TEST01', tz => '+05:30'})->status_is(302);
+  $t->post_ok('/login' => form => {email => $email, invite => $invite, tz => '+05:30'})->status_is(302);
   my $code = $t->app->mailer->codes->[-1][1];
   $t->post_ok('/login/check' => form => {code => $code})->status_is(302);
   $t->get_ok('/dashboard')->status_is(200);
@@ -67,6 +71,25 @@ subtest 'day paging on the Today graph' => sub {
     ->content_unlike(qr{>today</a>}, 'today shortcut removed')
     ->content_like(qr{<span class="sep">\|</span>}, 'AGP windows are pipe-separated')
     ->content_like(qr{hint caption}, 'captions carry the right-align class');
+};
+
+subtest 'deltas look back 30 min past midnight' => sub {
+  my $t2 = Test::Mojo->new('Glucoglu');
+  $t2->app->mailer(Glucoglu::Mailer::Fake->new);
+  $db->query("INSERT INTO invites (code) VALUES ('TEST02')");
+  _login($t2, 'late@b.co', 'TEST02');
+  my $uid = $db->query("SELECT id FROM users WHERE email = 'late\@b.co'")->array->[0];
+
+  # Local time is +05:30. Put the clock at 00:05 local: 23:50 is yesterday, 00:05 is today.
+  my ($off, $real) = (19800, CORE::time);
+  my $midnight = int(($real + $off) / 86400) * 86400 - $off;
+  my $ins = 'INSERT INTO readings (user_id, ts, mg_dl, source_type, raw) VALUES (?, to_timestamp(?), ?, \'stream\', \'{}\')';
+  $db->query($ins, $uid, $midnight - 600, 100);    # 23:50
+  $db->query($ins, $uid, $midnight + 300, 115);    # 00:05
+
+  local $main::CLOCK = $midnight + 300 - $real;
+  $t2->get_ok('/dashboard')->status_is(200)
+    ->content_like(qr{15mins</strong>\s*\+15 mg/dL}, 'delta 15 reaches back over midnight');
 };
 
 subtest 'settings holds ingest and account' => sub {
