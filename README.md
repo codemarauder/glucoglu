@@ -95,13 +95,13 @@ Two options, with the same runit service names. In both, PostgreSQL and Apache (
     service postgresql restart
     ufw allow in on br-glucoglu to 172.31.250.1 port 5432 proto tcp
 
-    # 2. Settings: one VAR=value per line, root-readable only. Never commit real values.
-    mkdir -p /etc/glucoglu
-    cp deploy/docker/glucoglu.env.example /etc/glucoglu/glucoglu.env
-    chmod 600 /etc/glucoglu/glucoglu.env     # then fill it in
+    # 2. Settings: all in .env next to docker-compose.yml (git-ignored, docker-ignored).
+    #    Never commit real values. The user who runs docker compose must read it.
+    cp deploy/docker/env.example .env
+    chmod 600 .env                            # then fill it in
 
-    # 3. Juggluco folder (static binary + jugglucodata/), owned by the uid the container uses
-    #    (GLUCOGLU_UID, default 1000). Put GLUCOGLU_UID and JUGGLUCO_HOST_DIR in .env if not defaults.
+    # 3. Juggluco folder (static binary + jugglucodata/): set JUGGLUCO_HOST_DIR in .env,
+    #    and GLUCOGLU_UID to the uid that owns it:
     ls -ln /opt/juggluco
 
     # 4. Build and start; the app runs its database migrations at start

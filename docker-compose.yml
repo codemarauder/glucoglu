@@ -7,9 +7,10 @@
 #   docker compose logs -f
 #   docker compose down
 #
-# Variables for this file (shell or a .env file next to it; .env is git-ignored):
-#   GLUCOGLU_UID       uid that owns the Juggluco folder on the host (default 1000)
-#   JUGGLUCO_HOST_DIR  Juggluco folder on the host, with the binary and jugglucodata/ (default /opt/juggluco)
+# All settings are in .env next to this file: cp deploy/docker/env.example .env
+# .env is git-ignored and docker-ignored. Compose reads it two ways:
+#   - for ${...} in this file (GLUCOGLU_UID, JUGGLUCO_HOST_DIR)
+#   - as env_file: every line becomes an environment variable in the container
 
 services:
   glucoglu:
@@ -23,9 +24,8 @@ services:
     init: true                 # tini as PID 1: forwards signals, reaps orphans
     stop_grace_period: 30s     # the entrypoint waits up to 20 s for the services to stop
 
-    # Secrets and settings: one VAR=value per line, root-readable only. Template:
-    # deploy/docker/glucoglu.env.example. Never commit real values.
-    env_file: /etc/glucoglu/glucoglu.env
+    # Secrets and settings: one VAR=value per line. Never commit real values.
+    env_file: .env
     environment:
       MOJO_MODE: production    # required: enables the GLUCOGLU_SECRET check and secure cookies
       JUGGLUCO_DIR: /juggluco
