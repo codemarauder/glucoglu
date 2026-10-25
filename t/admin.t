@@ -76,12 +76,30 @@ subtest 'TSV import (Libre 1 mirror path)' => sub {
   is $one->("SELECT raw->>'trend' FROM readings WHERE ts = to_timestamp(1764253834)"), 'STABLE', "Juggluco's trend label kept for audit";
 
   $out = qx{$^X script/glucoglu-admin import history $file 'imp\@b.co' 2>&1};
-  like $out, qr/imported 0 history readings.*3 duplicates/, 're-run inserts nothing';
+  like $out, qr/imported 0 history readings.*3 skipped/, 're-run inserts nothing; old rows skipped, not sent';
   is $one->('SELECT count(*) FROM readings'), 3, 'idempotent';
 
   $out = qx{$^X script/glucoglu-admin import spot $file 'imp\@b.co' 2>&1};
   like $out, qr/imported 3 spot readings/, 'spot coexists with history at same timestamps';
   is $one->('SELECT count(*) FROM readings'), 6, 'history + spot both stored';
+}, $one;
+
+subtest 'import skips rows older than newest minus 9 h, keeps newer ones' => sub {
+  $db->query(q{INSERT INTO users (email) VALUES ('win@b.co')});
+  my $newest = 1792847053;
+  my $write  = sub (@ts) {
+    my ($fh, $file) = tempfile(UNLINK => 1, SUFFIX => '.tsv');
+    print $fh join("\t", 'S1', $_, $_, 'x', 5.5, 1, 120), "\n" for @ts;
+    close $fh;
+    return $file;
+  };
+  my $run = sub ($file) { qx{$^X script/glucoglu-admin import history $file 'win\@b.co' 2>&1} };
+  like $run->($write->($newest)), qr/imported 1 history/, 'first import: no cutoff yet';
+  my $out = $run->($write->($newest - 5 * 3600, $newest - 10 * 3600));
+  like $out, qr/imported 1 history.*1 skipped/, '5 h older is new data and is stored; 10 h older is skipped';
+  is $one->('SELECT count(*) FROM readings WHERE user_id = (SELECT id FROM users WHERE email = \'win@b.co\')'), 2,
+    'only two rows stored';
+  like $run->($write->($newest, $newest - 5 * 3600)), qr/imported 0 history.*2 duplicates/, 'rows inside the window are duplicates';
 }, $one;
 
 subtest 'import refuses an unknown email and creates no user' => sub {

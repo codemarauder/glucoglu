@@ -69,12 +69,20 @@ elsif ($cmd eq 'import') {
   my $uid = $db->query('SELECT id FROM users WHERE email = ?', $email)->arrays->[0][0]
     or die "no such user: $email\n";
   open my $fh, '<', $file or die "cannot open $file: $!\n";
-  my ($inserted, $dupes, $rejected) = (0, 0, 0);
+  # The export holds all history. Skip rows older than the newest stored row minus 9 h:
+  # the sensor's 8-h buffer can still add rows inside that window, never older ones.
+  my ($newest) = $db->query(
+    'SELECT extract(epoch FROM max(ts))::bigint FROM readings WHERE user_id = ? AND source_type = ?',
+    $uid, $type)->array->@*;
+  my $cutoff = defined $newest ? $newest - 9 * 3600 : undef;
+  my ($inserted, $dupes, $rejected, $skipped) = (0, 0, 0, 0);
+  my $tx = $db->begin;    # one commit for the whole file; a die rolls everything back
   while (my $line = <$fh>) {
     $line =~ s/\r?\n$//;
     my @c = split /\t/, $line;
     next unless @c >= 7 && ($c[2] // '') =~ /^\d+$/ && ($c[6] // '') =~ /^\d+(\.\d+)?$/;   # header/noise lines
     my ($ts, $value) = ($c[2], $c[6]);
+    if (defined $cutoff && $ts < $cutoff) { $skipped++; next }
     my $mgdl = to_mgdl($value);    # unit rule D11, sensor-range limits
     if (!defined $mgdl) { $rejected++; next }
     my $rows = $db->query(
@@ -91,7 +99,8 @@ elsif ($cmd eq 'import') {
     )->rows;
     $rows ? $inserted++ : $dupes++;
   }
-  print "imported $inserted $type readings for $email ($dupes duplicates, $rejected rejected)\n";
+  $tx->commit;
+  print "imported $inserted $type readings for $email ($dupes duplicates, $rejected rejected, $skipped skipped)\n";
 }
 else { die usage() }
 
