@@ -1,11 +1,11 @@
 # Glucoglu container
 # License: AGPL-3.0
 #
-# runit services (deploy/docker/sv/):
-#   glucoglu           web app, Mojolicious prefork on :3000 (Apache on the host owns TLS)
-#   glucoglu-import    Libre 1 sync: Juggluco TSV export + import, every 60 s
-#   glucoglu-prune     drop expired login tokens and old mail log, daily
-#   juggluco-receiver  optional Juggluco mirror receiver (off unless JUGGLUCO_RECEIVER=1)
+# One image, two roles (deploy/docker/entrypoint.sh; docker-compose.yml runs both):
+#   app       runit services: glucoglu (web app, Mojolicious prefork on :3000; Apache on
+#             the host owns TLS), glucoglu-prune (daily), import-<name> (Libre 1 sync for
+#             each Juggluco user, every 60 s)
+#   juggluco  runit services: juggluco-<name> (Juggluco mirror receiver for each user)
 #
 # PostgreSQL runs on the host. See README, section Deploy.
 #
@@ -48,13 +48,11 @@ COPY script/    /app/script/
 COPY templates/ /app/templates/
 COPY public/    /app/public/
 
-# runit services and the entrypoint.
-COPY deploy/docker/sv/          /etc/sv/
+# Static runit services and the entrypoint. The entrypoint links the services for its
+# role into /etc/service at start, and makes one service per Juggluco user.
+COPY deploy/docker/sv/           /etc/sv/
 COPY deploy/docker/entrypoint.sh /usr/local/bin/glucoglu-entrypoint
-RUN chmod 755 /app/script/* /etc/sv/*/run /usr/local/bin/glucoglu-entrypoint \
- && mkdir -p /etc/service \
- && ln -s /etc/sv/glucoglu /etc/sv/glucoglu-import /etc/sv/glucoglu-prune \
-          /etc/sv/juggluco-receiver /etc/service/
+RUN chmod 755 /app/script/* /etc/sv/*/run /usr/local/bin/glucoglu-entrypoint
 
 EXPOSE 3000
 
@@ -62,3 +60,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -sf http://127.0.0.1:3000/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/glucoglu-entrypoint"]
+CMD ["app"]

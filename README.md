@@ -54,13 +54,17 @@ Nightscout-style JSON (`{"type":"sgv","date":<epoch ms>,"sgv":<value>}`, single 
 
 **Note:** Juggluco's uploader only pushes Bluetooth stream values (Libre 2/2+/3). Libre 1 sensors are NFC-only — their scans and history never reach the uploader. For Libre 1, use the mirror pipeline:
 
-    # 1. Juggluco server (cmdline) on any host, configured as mirror receiver
-    ./juggluco -riP -L <label> -w <password> -G && ./juggluco    # daemon
-    # 2. Phone: Mirror -> Add connection -> your host, port 8795, Scans (+Amounts)
-    # 3. Sync loop: the runit service glucoglu-import (see Deploy) runs script/libre1-sync
-    #    every 60 s. It exports both TSVs from the same data dir and imports them.
-    #    By hand:
-    ./juggluco -H history.tsv && ./juggluco -S scans.tsv
+    # 1. Juggluco server (cmdline): one receiver and one data folder per person (-d).
+    #    Always give -d: without it, Juggluco uses the folder in .jugglucorc, and every
+    #    -d writes .jugglucorc in the current folder.
+    ./juggluco -d users/NAME -p 9001                             # listen port
+    ./juggluco -d users/NAME -G                                  # mg/dL
+    ./juggluco -d users/NAME -r -i -P -L NAME -w PASSWORD        # passive receiving connection
+    ./juggluco -d users/NAME                                     # run the receiver
+    # 2. Phone: Mirror -> the connection -> host, port 9001, label NAME, password, Scans
+    # 3. Sync loop: script/libre1-sync, every 60 s from runit (see Deploy). It exports
+    #    both TSVs from the person's data folder and imports them. By hand:
+    ./juggluco -d users/NAME -H history.tsv && ./juggluco -d users/NAME -S scans.tsv
     script/glucoglu-admin import history history.tsv EMAIL
     script/glucoglu-admin import spot scans.tsv EMAIL
 
@@ -68,21 +72,26 @@ EMAIL must be an existing user (log in once first); the import refuses an unknow
 
 ## Deploy
 
-Two options, with the same runit service names. In both, PostgreSQL and Apache (TLS on 443) run on the host, and Apache proxies to `127.0.0.1:3000`.
+Two options. In both, PostgreSQL and Apache (TLS on 443) run on the host, and Apache proxies to `127.0.0.1:3000`.
 
-- **Option A: Docker.** One container with runit inside. No Perl on the host.
-- **Option B: on the host with runit.** Perl in perlbrew.
+- **Option A: Docker.** Two containers from one image, runit inside each. Many Libre 1 users. No Perl on the host.
+- **Option B: on the host with runit.** Perl in perlbrew. One Libre 1 user.
 
-| runit service | Does |
-|---|---|
-| `glucoglu` | web app on :3000 |
-| `glucoglu-import` | Libre 1 sync (`script/libre1-sync`) every 60 s |
-| `glucoglu-prune` | daily prune of expired tokens and old mail log |
-| `juggluco-receiver` | Docker only, optional: Juggluco mirror receiver (`JUGGLUCO_RECEIVER=1`) |
+| runit service | Option A (Docker) | Option B (host) | Does |
+|---|---|---|---|
+| `glucoglu` | container `glucoglu` | yes | web app on :3000 |
+| `glucoglu-prune` | container `glucoglu` | yes | daily prune of expired tokens and old mail log |
+| `import-NAME` / `glucoglu-import` | container `glucoglu`, one per user | one | Libre 1 sync (`script/libre1-sync`) every 60 s |
+| `juggluco-NAME` | container `juggluco`, one per user | — (run the receiver yourself) | Juggluco mirror receiver |
 
-### Option A: Docker (runit inside the container)
+### Option A: Docker (two containers, runit inside)
 
-`Dockerfile`, `docker-compose.yml`, `deploy/docker/`. The container reaches PostgreSQL through the Docker bridge gateway `172.31.250.1` (pinned in `docker-compose.yml`).
+`Dockerfile`, `docker-compose.yml`, `deploy/docker/`. One image, two containers:
+
+- `glucoglu`: web app, prune, and the imports. It has the secrets (`.env`) and reaches PostgreSQL through the Docker bridge gateway `172.31.250.1` (pinned in `docker-compose.yml`).
+- `juggluco`: the Juggluco receivers, open to the internet on ports 9001–9010. No secrets, no database password.
+
+Both mount the Juggluco folder at `/juggluco`. At each start, they make one service per folder in `users/`.
 
     # 1. PostgreSQL on the host
     apt install postgresql
@@ -100,8 +109,8 @@ Two options, with the same runit service names. In both, PostgreSQL and Apache (
     cp deploy/docker/env.example .env
     chmod 600 .env                            # then fill it in
 
-    # 3. Juggluco folder (static binary + jugglucodata/): set JUGGLUCO_HOST_DIR in .env,
-    #    and GLUCOGLU_UID to the uid that owns it:
+    # 3. Juggluco folder: the static binary and users/. Set JUGGLUCO_HOST_DIR in .env,
+    #    and GLUCOGLU_UID to the uid that owns the folder:
     ls -ln /opt/juggluco
 
     # 4. Build and start; the app runs its database migrations at start
@@ -111,12 +120,39 @@ Two options, with the same runit service names. In both, PostgreSQL and Apache (
 
     # 5. Apache: as in option B, step 5
 
+#### Juggluco users (Docker)
+
+One folder per person with a Libre 1. Libre 2/3 users need none: their Juggluco uploader
+sends to `/api/v1/entries` directly. Use the next free port in 9001–9010 and a new
+random password for each person. NAME: lower case letters, digits, `_` and `-`.
+
+    # As the folder owner (GLUCOGLU_UID), in the Juggluco folder:
+    cd /opt/juggluco
+    mkdir users/NAME
+    ./juggluco -d users/NAME -p 9002
+    ./juggluco -d users/NAME -G
+    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16; echo        # the password
+    ./juggluco -d users/NAME -r -i -P -L NAME -w PASSWORD
+    ./juggluco -d users/NAME -l 2>/dev/null                     # check: port, mg/dL, connection
+    printf 'EMAIL=their@account\n' > users/NAME/user.conf      # account must exist (log in once)
+    docker compose restart
+
+The phone mirrors to the server's address, that port, label NAME, and the password.
+The import starts only when `user.conf` has a valid `EMAIL=` line. To remove a person,
+delete the folder and restart. More than 10 users: widen the port range in
+`docker-compose.yml` (each published port runs one docker-proxy process).
+
 #### Operation (Docker)
 
-    docker compose logs -f                                   # all services
-    docker exec glucoglu sv status /etc/service/*            # all must show "run"
-    docker exec glucoglu sv restart /etc/service/glucoglu-import
+    docker compose logs -f                                   # all services, both containers
+    docker exec glucoglu sv status /etc/service/*            # web, prune, import-NAME
+    docker exec juggluco sv status /etc/service/*            # juggluco-NAME
+    docker exec glucoglu sv restart /etc/service/import-NAME
+    docker compose restart                                   # after you add or remove a user
     docker compose up -d --build                             # after git pull
+
+The receivers write a debug line for each packet. `docker logs juggluco` shows only one start
+line per receiver, unless `.env` has `JUGGLUCO_DEBUG=1` (then `docker compose up -d`).
 
 `docker stop` stops each service cleanly (`deploy/docker/entrypoint.sh`): `runsvdir` alone exits on SIGTERM and leaves its services to be killed.
 
@@ -154,7 +190,8 @@ The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.
     #    MOJO_MODE=production is already set. Keep it: without it Mojolicious runs in
     #    development mode, the GLUCOGLU_SECRET check does not run and the session
     #    cookie is not marked secure.
-    #    Optional: JUGGLUCO_DIR (default /opt/juggluco) for the Libre 1 sync.
+    #    Libre 1 sync: JUGGLUCO_DIR (folder with the binary, default /opt/juggluco) and
+    #    JUGGLUCO_DATA (the data folder used with -d, default $JUGGLUCO_DIR/jugglucodata).
 
     # 4. runit (apt install runit). Web app: hypnotoad in the foreground.
     #    Libre 1 sync loop: omit glucoglu-import if you have no Libre 1.

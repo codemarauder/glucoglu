@@ -1,16 +1,25 @@
-# Glucoglu: web app + Libre 1 sync (runit inside the container).
+# Glucoglu: two containers from one image (runit inside each).
 # License: AGPL-3.0
+#
+#   glucoglu  web app, daily prune, Libre 1 import for each Juggluco user. Has the secrets.
+#   juggluco  Juggluco mirror receivers, one per user, open to the internet. No secrets,
+#             no database access.
 #
 # PostgreSQL and Apache (TLS on 443) run on the host. See README, section Deploy.
 #
 #   docker compose up -d --build
 #   docker compose logs -f
-#   docker compose down
+#   docker compose restart        # after you add or remove a Juggluco user
 #
 # All settings are in .env next to this file: cp deploy/docker/env.example .env
 # .env is git-ignored and docker-ignored. Compose reads it two ways:
 #   - for ${...} in this file (GLUCOGLU_UID, JUGGLUCO_HOST_DIR)
-#   - as env_file: every line becomes an environment variable in the container
+#   - as env_file of the glucoglu container: every line becomes an environment variable
+#
+# Juggluco folder on the host (JUGGLUCO_HOST_DIR, mounted at /juggluco in both containers):
+#   juggluco               the static Juggluco binary
+#   users/<name>/          Juggluco data folder of one person (used with -d)
+#   users/<name>/user.conf one line: EMAIL=<their Glucoglu account>
 
 services:
   glucoglu:
@@ -20,6 +29,7 @@ services:
         APP_UID: ${GLUCOGLU_UID:-1000}
     image: glucoglu:latest
     container_name: glucoglu
+    command: ["app"]
     restart: unless-stopped
     init: true                 # tini as PID 1: forwards signals, reaps orphans
     stop_grace_period: 30s     # the entrypoint waits up to 20 s for the services to stop
@@ -28,17 +38,18 @@ services:
     env_file: .env
     environment:
       MOJO_MODE: production    # required: enables the GLUCOGLU_SECRET check and secure cookies
-      JUGGLUCO_DIR: /juggluco
+      # Guard: values here replace the same names from env_file (.env), so a stray
+      # line in .env cannot move the entrypoint away from the mounted folders.
+      JUGGLUCO_ROOT: /juggluco
+      SVDIR: /etc/service
 
     ports:
       # Loopback only: Apache on the host proxies to it. Docker's published ports
       # bypass ufw, so a bare "3000:3000" would be open to the internet.
       - "127.0.0.1:3000:3000"
-      # Only with the receiver in the container (JUGGLUCO_RECEIVER=1): the phone mirrors here.
-      # - "8795:8795"
 
     volumes:
-      # Juggluco binary + data. Read-write: the export writes state files there.
+      # Read-write: each export writes Juggluco state files in the user's folder.
       - ${JUGGLUCO_HOST_DIR:-/opt/juggluco}:/juggluco
 
     deploy:
@@ -47,11 +58,53 @@ services:
           memory: 512M
           cpus: '1.0'
 
-    logging:
+    logging: &logging
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
+
+  juggluco:
+    build:
+      context: .
+      args:
+        APP_UID: ${GLUCOGLU_UID:-1000}
+    image: glucoglu:latest
+    container_name: juggluco
+    command: ["juggluco"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    # No env_file: this container is open to the internet and gets no secrets.
+    environment:
+      JUGGLUCO_ROOT: /juggluco
+      SVDIR: /etc/service
+      # 1 = receiver debug lines in `docker logs juggluco` (one line per packet). Default 0.
+      JUGGLUCO_DEBUG: ${JUGGLUCO_DEBUG:-0}
+
+    ports:
+      # One port per person, set in their Juggluco configuration (-d users/<name> -p <port>).
+      # Open to the internet on purpose: the phones mirror here. Docker's published ports
+      # bypass ufw. Each port needs one docker-proxy process: widen the range only as needed.
+      - "9001-9010:9001-9010"
+
+    volumes:
+      - ${JUGGLUCO_HOST_DIR:-/opt/juggluco}:/juggluco
+
+    healthcheck:
+      # Healthy when every receiver runs (also when there are no users yet).
+      test: ["CMD-SHELL", "for s in /etc/service/*; do [ -e \"$$s\" ] || exit 0; sv status \"$$s\" | grep -q '^run:' || exit 1; done"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+    logging: *logging
 
 # Pinned bridge name and subnet. The host's PostgreSQL setup depends on both:
 #   listen_addresses = 'localhost,172.31.250.1'          (postgresql.conf)

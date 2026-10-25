@@ -1,20 +1,31 @@
 #!/bin/sh
-# Libre 1 path: export the Juggluco mirror receiver's data as TSV and import it.
-# The runit service glucoglu-import runs it every 60 s (on the host or in the container).
+# Libre 1 path: export one person's Juggluco mirror data as TSV and import it.
+# A runit service runs it every 60 s (on the host: glucoglu-import; in Docker: import-<name>).
 # The import reads only rows newer than the last import minus 9 h, so repeats are
 # cheap, and the dedup makes them safe.
 #   GLUCOGLU_LIBRE1_EMAIL  account that receives the data (required)
-#   JUGGLUCO_DIR           folder with the juggluco binary and jugglucodata/ (default /opt/juggluco)
+#   JUGGLUCO_DATA          Juggluco data folder of this person, passed as -d
+#                          (default: $JUGGLUCO_DIR/jugglucodata, Juggluco's own default)
+#   JUGGLUCO_BIN           Juggluco binary (default: $JUGGLUCO_DIR/juggluco)
+#   JUGGLUCO_DIR           folder with the binary (default /opt/juggluco)
 #   PERL                   perl that runs glucoglu-admin (default: perl in PATH)
 set -eu
 : "${GLUCOGLU_LIBRE1_EMAIL:?set it in the environment}"
 PERL=${PERL:-perl}
+JUGGLUCO_DIR=${JUGGLUCO_DIR:-/opt/juggluco}
+BIN=${JUGGLUCO_BIN:-$JUGGLUCO_DIR/juggluco}
+DATA=${JUGGLUCO_DATA:-$JUGGLUCO_DIR/jugglucodata}
+case $BIN  in /*) ;; *) BIN=$(pwd)/$BIN ;; esac
+case $DATA in /*) ;; *) DATA=$(pwd)/$DATA ;; esac
+[ -d "$DATA" ] || { echo "libre1-sync: no Juggluco data folder $DATA" >&2; exit 1; }
 ADMIN=$(cd "$(dirname "$0")" && pwd)/glucoglu-admin
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-cd "${JUGGLUCO_DIR:-/opt/juggluco}"
-# The export prints many debug lines: show them only if it fails.
-./juggluco -H "$TMP/history.tsv" >"$TMP/export.log" 2>&1 || { cat "$TMP/export.log"; exit 1; }
-./juggluco -S "$TMP/scans.tsv"   >"$TMP/export.log" 2>&1 || { cat "$TMP/export.log"; exit 1; }
-"$PERL" "$ADMIN" import history "$TMP/history.tsv" "$GLUCOGLU_LIBRE1_EMAIL"
-"$PERL" "$ADMIN" import spot    "$TMP/scans.tsv"   "$GLUCOGLU_LIBRE1_EMAIL"
+# Run in the temporary folder: every -d writes .jugglucorc into the current folder.
+cd "$TMP"
+# Always an explicit -d: never depend on a .jugglucorc. The export prints many
+# debug lines: show them only if it fails.
+"$BIN" -d "$DATA" -H history.tsv >export.log 2>&1 || { cat export.log; exit 1; }
+"$BIN" -d "$DATA" -S scans.tsv   >export.log 2>&1 || { cat export.log; exit 1; }
+"$PERL" "$ADMIN" import history history.tsv "$GLUCOGLU_LIBRE1_EMAIL"
+"$PERL" "$ADMIN" import spot    scans.tsv   "$GLUCOGLU_LIBRE1_EMAIL"
