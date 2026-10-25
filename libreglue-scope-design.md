@@ -1,8 +1,8 @@
-# Glucoglu — Self-Hosted Glucose Monitoring & Analytics Platform (Handoff v2.1)
+# Glucoglu — Self-Hosted Glucose Monitoring & Analytics Platform (Handoff v2.2)
 
-*   **Version:** 2.1 (supersedes `project_handoff.md` v1; v2.1: storage → PostgreSQL, O1–O6/O8 resolved, caregiver sharing added)
+*   **Version:** 2.2 (supersedes `project_handoff.md` v1; v2.1: storage → PostgreSQL, O1–O6/O8 resolved, caregiver sharing added; v2.2, 2026-10-25: code review fixes, Danne event rule with gap tolerance, unit rule with sensor-range limits, quick log in the PWA (D17), Juggluco treatments not ingested)
     
-*   **Status:** Metric scope verified against primary sources and approved. All decisions and open items closed. Build steps 1–4 done (§13): skeleton and login, ingest, schema, Tier 1 engine + AGP + Today view. Build step 5 (PP engine) is next.
+*   **Status:** Metric scope verified against primary sources and approved. All decisions and open items closed. Build steps 1–4 done (§13): skeleton and login, ingest, schema, Tier 1 engine + AGP + Today view. Code review fixes done: secure tokens, production secret check, login link confirm form, event rule, unit rule, import and ingest transactions, dashboard fixes. Review items still open: runit deploy, "Last 24 h" summary line, time-weighted metrics (one source per 15-min slot). Then build step 5 (quick log + PP engine).
     
 *   **Stack:** Perl / Mojolicious, PostgreSQL, PWA (vendored JS, no npm build step)
     
@@ -40,12 +40,13 @@ Core philosophy: minimize supply-chain attack vectors and dependency bloat. Use 
 | D8 | Storage: PostgreSQL (supersedes ClickHouse, 2026-10-24). Dedup = UNIQUE (user ID, timestamp, source type); raw payload kept in JSONB |
 | D9 | Login: email link + code (Claude.ai pattern). One token, 10-min expiry, single use, no passwords. First login = invite code + email → account created and verified (closes O5) |
 | D10 | Read-only caregiver sharing in v1: table `shares` (owner, viewer); every read query checks ownership or grant |
-| D11 | Units: store mg/dL only; user selects display/report unit; ingest range rule (≤27.8 → mmol/L; ≥40 → mg/dL; between → reject) |
+| D11 | Units: store mg/dL only; user selects display/report unit; ingest range rule (2.2–27.8 → mmol/L; 40–500 → mg/dL; anything else → reject; see §3) |
 | D12 | Export: CSV + browser PDF (PWA print stylesheet) in v1; right-to-delete at the storage layer; scheduled/emailed reports in v2 via headless Chromium (not Selenium) |
 | D13 | Time: store UTC; per-user time zone from the browser; reports convert |
 | D14 | Product: Glucoglu — "the glue for your glucose data from Juggluco" (login page). One canonical domain for app + mail; optional defensive redirect of the .com to the canonical. Juggluco name: nominative use only — factual data source, no logos, no "official" |
 | D15 | License: AGPLv3. Applies also to the hosted service. GPLv3 code can enter the project (GPLv3 §14); check Juggluco's license file only if we ever copy its code |
 | D16 | Deploy: app Perl in perlbrew (`perl-5.x@glucoglu` lib, no distro-Perl pollution). A front-end proxy (e.g. Apache) owns TLS on 443 and proxies to hypnotoad on 127.0.0.1:3000; `proxy => 1` trusts X-Forwarded-* |
+| D17 | Meal, exercise and sleep marks are logged in the Glucoglu PWA (quick log, §6), one tap each. Juggluco treatments (`/api/v1/treatments`) and mirror amounts (`-N` export) are not ingested in v1: Juggluco's entry UI is hard to use, and one in-app path gives one data format. Turn off sending amounts/treatments in Juggluco, so its uploader does not retry against an endpoint we do not serve |
 
 * * *
 
@@ -77,7 +78,7 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
 
 ### Storage design (PostgreSQL)
 
-*   One instance stores everything: users, invite codes, login tokens, readings, meals, insulin, IOB, exercise, notes, lab A1c, shares. One backup, one restore.
+*   One instance stores everything: users, invite codes, login tokens, readings, meals, insulin, IOB, exercise, sleep, notes, lab A1c, shares. One backup, one restore.
     
 *   Dedup: UNIQUE (user ID, timestamp, source type) + ON CONFLICT DO NOTHING. Immediate and deterministic. No background merges, so a query right after insert can never count one reading twice.
     
@@ -85,7 +86,9 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
     
 *   Raw payload: one JSONB column keeps each original Juggluco payload. Audit trail and evidence for O7.
     
-*   Unit rule at ingest, per glucose value: ≤27.8 → mmol/L, multiply by 18.018 → mg/dL. ≥40 → mg/dL as-is. Between → impossible in both ranges: reject and log. The sensor range (40–500 mg/dL = 2.2–27.8 mmol/L) makes the two unit ranges disjoint.
+*   Quick log marks (D17): `meals` gets `kind` (breakfast | lunch | dinner | snack, optional); `exercise` gets `intensity` (light | moderate | vigorous, optional); new table `sleep` (user ID, start, end). Times in UTC like all other data. Needs one migration (build step 5).
+    
+*   Unit rule at ingest, per glucose value (`Glucoglu::Units`, one function for the uploader and the TSV import): 2.2–27.8 → mmol/L, multiply by 18.018 → mg/dL. 40–500 → mg/dL as-is. Anything else (0, negative, non-numeric, `Inf`, or between the two ranges) → reject and log. The sensor range (40–500 mg/dL = 2.2–27.8 mmol/L) makes the two unit ranges disjoint. Checked 2026-10-25: Juggluco shows LO/HI only on screen and stores numbers; no stored value was outside 40–500.
     
 *   All timestamps in UTC. Per-user time zone (the PWA sends it at registration); reports convert.
     
@@ -106,11 +109,11 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
 
 1.  Libre 2/2+/3 (Bluetooth stream): Juggluco's Nightscout uploader POSTs to `/api/v1/entries` (V1: `api-secret` header; V3: `/api/v2/authorization/request` handshake + Bearer). Verified against Juggluco source and live data (O7): Nightscout-style JSON, `sgv` + `date` epoch ms.
     
-2.  Libre 1 (NFC only): Juggluco's uploader pushes stream values ONLY — scans and history are never uploaded (upstream gap). Path: Juggluco mirror → Juggluco cmdline server (receiver) → `-H`/`-S` TSV exports → `glucoglu-admin import history|spot` (cron). Re-imports are safe (dedup).
+2.  Libre 1 (NFC only): Juggluco's uploader pushes stream values ONLY — scans and history are never uploaded (upstream gap). Path: Juggluco mirror → Juggluco cmdline server (receiver) → `-H`/`-S` TSV exports → `glucoglu-admin import history|spot`, run by a runit loop every 60 s (`script/libre1-sync`, added with the runit deploy). The import reads only rows newer than the last import minus 9 h, in one transaction. Re-imports are safe (dedup).
     
 3.  PostgreSQL ingests historical blocks and spot scans. The UNIQUE constraint on (user ID, timestamp, source type) ignores overlapping timestamps from sequential scans within the same 8-hour window [1].
     
-4.  Juggluco also sends: meal marks (Amount field [1]), insulin doses, IOB, exercise marks, notes — via treatments (uploader) and amounts (mirror; `-N` export).
+4.  Juggluco can also send meal marks (Amount field [1]), insulin doses, IOB, exercise marks and notes, via treatments (uploader, `/api/v1/treatments`) and amounts (mirror; `-N` export). Not ingested in v1 (D17): marks come from the quick log in the PWA. Turn off sending amounts in Juggluco.
     
 5.  ~~Verify before build: capture one real Juggluco payload.~~ Done (O7 resolved): payload format and TSV formats confirmed against live data, 2026-10-24.
     
@@ -121,7 +124,7 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
 
 Base engine per handoff [1]:
 
-*   Input: meal timestamp (PWA or Juggluco Amount field) [1].
+*   Input: meal timestamp from the PWA quick log (D17). The logged time is the meal start; the user can set it back ("30 min ago") when logging after the meal.
     
 *   Window: 1–3 h after the meal mark [1].
     
@@ -166,12 +169,26 @@ Clinical targets (verified):
         
 *   **Trend and deltas (v1 decision, revised after field review)**: the "brace for it" signal is the delta numbers, not the arrow. Display Δ1 / Δ5 / Δ15 (change over the last 1 / 5 / 15 minutes, each from readings bracketing the window, each "--" when no data brackets it). Arrow uses Dexcom thresholds on mg/dL/min slope (>=3 Double, 2-3 Single, 1-2 FortyFive, <1 Flat, mirrored down) computed from the best available basis (Delta5 if data brackets it, else Delta15 -- an approximation at NFC cadence). Doubles are genuinely rarer on Libre 1: spikes between 15-min points are invisible to the sensor, and thresholds are NOT lowered to compensate -- the deltas carry the speed information. Juggluco's own direction (uploader `direction` field; mirror TSV `Rate`/`ChangeLabel`) is preserved in readings.raw for audit (TSV import includes it); display is always computed, so it cannot disagree across sources. Nightscout returns `delta` in the display unit but classifies arrows in mg/dL/min -- we do the same.
     
+*   **Quick log (D17)** — one tap for each mark, like the Libre app; no other app needed:
+    
+    *   Buttons: Meal, Exercise, Sleep. A tap logs "now". One more tap sets the time back: 15 / 30 / 60 min, or a typed time.
+        
+    *   Meal: kind is optional. The default comes from the local time (breakfast, lunch, dinner, else snack); one tap changes it. Carbs (g) and a note are optional.
+        
+    *   Exercise: duration in minutes and intensity (light / moderate / vigorous). Both optional, so a single tap still logs the mark.
+        
+    *   Sleep: start and end. Two taps ("Going to sleep", "Woke up"), or both times typed. A start with no end shows as open until the next "Woke up".
+        
+    *   Marks show on the Today chart at their time (meal, exercise, sleep band). The owner can edit and delete marks. Viewers see them read-only (D10).
+        
 *   PWA dashboard, vendored JS, offline-capable.
     
 
 * * *
 
 ## 7. Metric Specification (v1, all verified)
+
+**Weighting (target, code review item L1):** percentage metrics, mean and SD weight each reading by the time it covers. One source per 15-min slot: stream readings if the slot has any, else the history value (spot scans stay out). A history value covers the 15 min around its timestamp (checked 2026-10-25 on 1,463 values: 3.4 mg/dL mean difference to the centered stream mean, 6.1 for the 15 min before or after). Until L1, each reading counts once, so 1-min stream days outweigh 15-min history days.
 
 Unit pairs (mg/dL = mmol/L): 70 = 3.9, 54 = 3.0, 63 = 3.5, 140 = 7.8, 180 = 10.0, 250 = 13.9.
 
@@ -188,8 +205,8 @@ Unit pairs (mg/dL = mmol/L): 70 = 3.9, 54 = 3.0, 63 = 3.5, 140 = 7.8, 180 = 10.0
 | 7 | GMI | `% = 3.31 + 0.02392×mean [mg/dL]`; IFCC: `mmol/mol = 12.71 + 4.70587×mean [mmol/L]` | — | Bergenstal 2018, _Diabetes Care_ 41(11):2275–2280 | Any; use ≥14 days. Note: formula derived from Dexcom data; sensor-bias caveat per source |
 | 8 | eA1c (ADAG) | `A1c% = (mean+46.7)/28.7 [mg/dL]` | — | Nathan 2008, _Diabetes Care_ 31(8):1473–1478 | Any |
 | 9 | AGP | percentiles 5/25/50/75/95 by time of day, 14 days | — | Mazze 1987; Bergenstal 2013, _Diabetes Technol Ther_ 15(3):198–211 | Any |
-| 10 | Data sufficiency | ≥70% of 14 days; alternative: 10 days at 80–100%. Measured as filled 15-min slots / (days × 96); a slot is filled if it holds at least one reading. Reading counts are not used | — | Battelino 2019; Battelino 2023, _Lancet Diabetes Endocrinol_ 11:42–57 | Any |
-| 11 | Hypo/hyper events | Event starts: ≥15 min below threshold. Ends: ≥15 min at/above exit (L1 exit ≥70; L2 exit ≥54). Extended hypo <70: >120 min. Extended hyper >250: ≥90 cumulative min within 120 min. A gap of more than 20 min between readings (one missing 15-min point plus jitter) breaks the run. An event that a gap or the end of the data closes counts if the time beyond the threshold is ≥15 min; with no recovery seen, that time runs from the first to the last reading beyond the threshold | — | Danne 2017, _Diabetes Care_ 40(12):1631–1640; Battelino 2023 Table 4 | 1-min best |
+| 10 | Data sufficiency | ≥70% of 14 days; alternative: 10 days at 80–100%. Measured as filled 15-min slots / (days × 96); a slot is filled if it holds at least one reading. Reading counts are not used. Target: code review item L1; until then the code counts readings against 96/day | — | Battelino 2019; Battelino 2023, _Lancet Diabetes Endocrinol_ 11:42–57 | Any |
+| 11 | Hypo/hyper events | Event starts: ≥15 min below threshold. Ends: ≥15 min at/past the exit level (L1 exit ≥70; L2 exit ≥54; hyper exit ≤250). Extended hypo <70: >120 min. Extended hyper >250: ≥90 cumulative min within 120 min. A gap of more than 20 min between readings (one missing 15-min point plus jitter) breaks the run. An event that a gap or the end of the data closes counts if the time beyond the threshold is ≥15 min; with no recovery seen, that time runs from the first to the last reading beyond the threshold | — | Danne 2017, _Diabetes Care_ 40(12):1631–1640; Battelino 2023 Table 4 | 1-min best |
 
 ### Tier 2 — Population profiles (all in v1; threshold presets only, no extra code)
 
@@ -210,7 +227,7 @@ Unit pairs (mg/dL = mmol/L): 70 = 3.9, 54 = 3.0, 63 = 3.5, 140 = 7.8, 180 = 10.0
 | 19 | GMI − lab A1c gap | track gap over time; user enters lab A1c. Real-world discordance: ≥0.5 pp in 50%, ≥1.0 pp in 22% (trials: 28% and 3%) | Bergenstal 2018 Table 3; Perlman 2021, _Diabetes Technol Ther_ 23(4):253–258 | Any; lab entry required |
 | 20 | LBGI / HBGI | `f(x) = 1.509×((ln x)^1.084 − 5.381)` [x in mg/dL]; `r(x) = 22.77×f(x)²`; LBGI = mean of r over readings ≤112.5; HBGI over >112.5. Zones: LBGI <2.5 low, 2.5–5 moderate, >5 high | Kovatchev 2019, _J Diabetes Sci Technol_ 13(4):627–635; validation: Kovatchev 1998, _Diabetes Care_ 21:1870–1875; constant: Gaynanova 2018, _Diabetes Technol Ther_ 20(4):317 | Any |
 | 25 | Scan gap alarm | warn as `now − last scan` nears the 8-hour buffer [1]. Consensus: min 3 scans/day, ≤8 h apart. Warn threshold default 6.5 h (tunable). Based on the last spot scan. Delivery: email through the existing SMTP relay (D9); Web Push is out because it needs crypto modules, against the build rules. The import also records when it last ran: if that time is stale, the alarm reports a stopped sync, not a missed scan | Buffer [1]; rule: Battelino 2023; scan frequency ↔ outcomes: Dunn 2018, _Diabetes Res Clin Pract_ 137:37–46 | NFC only |
-| 26 | Data completeness | filled 15-min slots / (days × 96), the same measure as row 10. A slot is filled if it holds at least one reading, so NFC (96/day) and stream (1,440/day) users use one scale | Project-specific; consensus requires reporting % data obtained (Battelino 2023) | Both |
+| 26 | Data completeness | filled 15-min slots / (days × 96), the same measure as row 10. A slot is filled if it holds at least one reading, so NFC (96/day) and stream (1,440/day) users use one scale. Target: code review item L1; until then the code counts readings | Project-specific; consensus requires reporting % data obtained (Battelino 2023) | Both |
 | 29 | Dawn phenomenon | `Δ = G(pre-breakfast) − G(nadir)`, per day on complete nights. Present if Δ > 20 mg/dL. Median T2D magnitude ~16 mg/dL; adds ~0.4 pp to HbA1c | Monnier 2013, _Diabetes Care_ 36(12):4057–4062; commentary: Porcellati 2013, 36(12):3860–3862 | Any; nights with gaps → invalid |
 | 31 | GRI | `3.0×%VLow + 2.4×%Low + 1.6×%VHigh + 0.8×%High`. Scale 0 (best) to 100 (worst). GRI grid display | Klonoff 2022, _J Diabetes Sci Technol_, doi:10.1177/19322968221085273; emerging metric per Battelino 2023 and APAC consensus (Kong 2023, _Diabetes Res Clin Pract_) | Any |
 
@@ -234,7 +251,7 @@ Unit pairs (mg/dL = mmol/L): 70 = 3.9, 54 = 3.0, 63 = 3.5, 140 = 7.8, 180 = 10.0
 | 23 | MODD | Molnar 1972, _Diabetologia_ 8(5):342–348 | ≥48 h continuous required |
 | 24 | GVP | Peyser 2018, _Diabetes Technol Ther_ 20(1):6–16 | `(L/L₀ − 1)×100`. 1-min best; 15-min approximate; >30 min unsuitable |
 | 27 | Overnight report | Nocturnal window 00:00–05:59 per Battelino 2023 | — |
-| 28 | Exercise response | Riddell 2017, _Lancet Diabetes Endocrinol_ 5(5):377–390 | Hypo risk ≥24 h post-exercise; needs exercise marks |
+| 28 | Exercise response | Riddell 2017, _Lancet Diabetes Endocrinol_ 5(5):377–390 | Hypo risk ≥24 h post-exercise; needs exercise marks (quick log, D17) |
 | 30 | Week-over-week deltas | Project-specific | Trivial once Tier 1 exists |
 
 **Naming note:** handoff v1 used the label "GVI". The verified curve-length metric is GVP (Peyser 2018). Implement GVP under the v1 label if the name matters, or rename to GVP.
@@ -255,7 +272,7 @@ Unit pairs (mg/dL = mmol/L): 70 = 3.9, 54 = 3.0, 63 = 3.5, 140 = 7.8, 180 = 10.0
     
 *   Public VPS with TLS.
 
-*   The app shows "Not for treatment decisions".
+*   Every page shows "Not for treatment decisions" (layout footer).
 
 *   Operator maintenance via `script/glucoglu-admin` CLI (invites, user list, right-to-delete, prune of expired tokens and old mail log). No web admin in v1; the operator is the admin.
     
@@ -310,7 +327,7 @@ These gaps are the product differentiation.
     
 4.  Tier 1 engine + AGP chart. Every read query goes through the ownership-or-grant check (D10).
     
-5.  PP engine + extensions [1].
+5.  Quick log (D17, §6): migration for meal kind, exercise intensity, `sleep`; log, edit, delete; marks on the Today chart. Then the PP engine + extensions [1].
     
 6.  Tier 3: LBGI/HBGI, GRI, scan gap alarm, completeness, dawn phenomenon.
     
@@ -388,4 +405,4 @@ These gaps are the product differentiation.
 
 * * *
 
-**Next action:** build steps 1–4 are done and the review fixes for security, data and Libre 1 import are in. Next is build step 5: the PP engine and its extensions (§5).
+**Next action:** build steps 1–4 and the code review fixes are done (security, events, units, import, ingest, dashboard). Next, in this order: deploy with runit (sets `MOJO_MODE=production`, runs the Libre 1 sync loop), the "Last 24 h" summary line, then time-weighted metrics (review item L1; do it before trusting 30- and 90-day numbers). Then build step 5: quick log (D17), then the PP engine.
