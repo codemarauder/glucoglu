@@ -6,6 +6,7 @@ use Mojo::Pg;
 use Mojo::JSON 'encode_json';
 use Digest::SHA 'sha256_hex';
 use Glucoglu::Random 'token';
+use Glucoglu::Units 'to_mgdl';
 
 # Operator maintenance. Run on the server with the app's environment
 # (GLUCOGLU_DB_DSN). No web admin in v1; this is the admin panel.
@@ -76,7 +77,7 @@ elsif ($cmd eq 'import') {
     my @c = split /\t/, $line;
     next unless @c >= 7 && ($c[2] // '') =~ /^\d+$/ && ($c[6] // '') =~ /^\d+(\.\d+)?$/;   # header/noise lines
     my ($ts, $value) = ($c[2], $c[6]);
-    my $mgdl = $value <= 27.8 ? $value * 18.018 : $value >= 40 ? $value : undef;           # unit rule D11
+    my $mgdl = to_mgdl($value);    # unit rule D11, sensor-range limits
     if (!defined $mgdl) { $rejected++; next }
     my $rows = $db->query(
       'INSERT INTO readings (user_id, ts, mg_dl, source_type, source_interval, raw)

@@ -40,6 +40,16 @@ subtest 'unit rule (D11)' => sub {
   is $one->('SELECT count(*) FROM readings'), 3, 'value between both unit ranges rejected';
 }, $one;
 
+subtest 'zero, negative, text and out-of-range are rejected' => sub {
+  my $before = $one->('SELECT count(*) FROM readings');
+  my $n = 1730010000000;
+  for my $bad (0, -5, 'abc', 'Inf', 501) {
+    $t->post_ok('/api/v1/entries?token=tok123', json => {type => 'sgv', date => $n += 1000, sgv => $bad})
+      ->status_is(200)->json_is('/inserted' => 0)->json_is('/rejected' => 1);
+  }
+  is $one->('SELECT count(*) FROM readings'), $before, 'nothing stored';
+}, $one;
+
 subtest 'auth' => sub {
   $t->post_ok('/api/v1/entries?token=WRONG', json => {sgv => 100})->status_is(401);
   $t->post_ok('/api/v1/entries', json => {sgv => 100})->status_is(401);

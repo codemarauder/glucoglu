@@ -3,11 +3,7 @@ use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use Mojo::JSON 'encode_json';
 use Digest::SHA 'sha1_hex';
-
-# Unit rule (D11): <=27.8 is mmol/L, >=40 is mg/dL. Between is impossible in both ranges.
-my $MMOL_MAX  = 27.8;
-my $MGDL_MIN  = 40;
-my $MMOL_CONV = 18.018;
+use Glucoglu::Units 'to_mgdl';
 
 # Resolve the ingest user: ?token= query, Authorization: Bearer (Nightscout V3),
 # or api-secret: sha1(token) header (Nightscout V1 — Juggluco's default mode).
@@ -58,11 +54,9 @@ sub entries ($self) {
     $parsed++;
     $from = $ts if !defined $from || $ts < $from;
     $to   = $ts if !defined $to   || $ts > $to;
-    my $mgdl = $value <= $MMOL_MAX ? $value * $MMOL_CONV
-              : $value >= $MGDL_MIN ? $value
-              : undef;
+    my $mgdl = to_mgdl($value);    # unit rule D11, sensor-range limits
     if (!defined $mgdl) {
-      $self->app->log->warn("rejected reading between unit ranges: $value");
+      $self->app->log->warn('rejected reading outside sensor range: ' . substr("$value", 0, 40));
       $rejected++;
       next;
     }
