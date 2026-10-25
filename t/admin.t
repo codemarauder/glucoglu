@@ -56,6 +56,7 @@ subtest 'login link works without mail' => sub {
 }, $one;
 
 subtest 'TSV import (Libre 1 mirror path)' => sub {
+  $db->query(q{INSERT INTO users (email) VALUES ('imp@b.co')});
   my ($fh, $file) = tempfile(UNLINK => 1, SUFFIX => '.tsv');
   print $fh "Sensorid\tnr\tUnixTime\tYYYY-mm-ddTHH:MM:SS\tTZ\tMin\tmg/dL\tRate\tChangeLabel\n";
   print $fh join("\t", qw(3MH01DZF38H 4 1764253834 2025-11-27T20:00:34 5.5 60 147 -0.3 STABLE)), "\n";
@@ -81,6 +82,19 @@ subtest 'TSV import (Libre 1 mirror path)' => sub {
   $out = qx{$^X script/glucoglu-admin import spot $file 'imp\@b.co' 2>&1};
   like $out, qr/imported 3 spot readings/, 'spot coexists with history at same timestamps';
   is $one->('SELECT count(*) FROM readings'), 6, 'history + spot both stored';
+}, $one;
+
+subtest 'import refuses an unknown email and creates no user' => sub {
+  my ($fh, $file) = tempfile(UNLINK => 1, SUFFIX => '.tsv');
+  print $fh join("\t", qw(3MH01DZF38H 4 1764253834 2025-11-27T20:00:34 5.5 60 147 -0.3 STABLE)), "\n";
+  close $fh;
+  my $users    = $one->('SELECT count(*) FROM users');
+  my $readings = $one->('SELECT count(*) FROM readings');
+  my $out = qx{$^X script/glucoglu-admin import history $file 'typo\@b.co' 2>&1};
+  ok $?, 'import exits non-zero';
+  like $out, qr/no such user: typo\@b\.co/, 'error names the email';
+  is $one->('SELECT count(*) FROM users'), $users, 'no new user row';
+  is $one->('SELECT count(*) FROM readings'), $readings, 'no readings stored';
 }, $one;
 
 subtest 'unknown command fails' => sub {

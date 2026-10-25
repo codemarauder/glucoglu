@@ -66,8 +66,6 @@ elsif ($cmd eq 'import') {
   die "usage: glucoglu-admin import (history|spot) FILE EMAIL\n"
     unless defined($type) && defined($file) && defined($email) && $type =~ /^(history|spot)$/;
   my $db = $pg->db;
-  $db->query('INSERT INTO users (email, api_token) VALUES (?, ?) ON CONFLICT (email) DO NOTHING',
-    $email, token(12));
   my $uid = $db->query('SELECT id FROM users WHERE email = ?', $email)->arrays->[0][0]
     or die "no such user: $email\n";
   open my $fh, '<', $file or die "cannot open $file: $!\n";
