@@ -97,6 +97,47 @@ subtest 'non-numeric user_id is not found, not 500' => sub {
   $t->get_ok('/dashboard?user_id=1%20OR%201%3D1')->status_is(404, 'no SQL reaches the database');
 };
 
+subtest 'Last 24 h summary under Today' => sub {
+  my $mk = sub ($email, $invite) {
+    my $tt = Test::Mojo->new('Glucoglu');
+    $tt->app->mailer(Glucoglu::Mailer::Fake->new);
+    $db->query('INSERT INTO invites (code) VALUES (?)', $invite);
+    _login($tt, $email, $invite);
+    my $uid = $db->query('SELECT id FROM users WHERE email = ?', $email)->array->[0];
+    return ($tt, $uid);
+  };
+  my $ins = sub ($uid, $ts, $mg, $type) {
+    $db->query('INSERT INTO readings (user_id, ts, mg_dl, source_type, raw) VALUES (?, to_timestamp(?), ?, ?, \'{}\')',
+      $uid, $ts, $mg, $type);
+  };
+  my $now = time;
+
+  # 10 history readings in the last 24 h: 60, 50, seven at 120, one at 200 (15 min apart).
+  # Known: TIR 70%, <70 20%, <54 10%, >180 10%, mean 115, one hypo event, 10 of 96 slots = 10%.
+  my ($t1, $u1) = $mk->('l24a@b.co', 'TEST03');
+  my $base = $now - 6 * 3600;
+  my $i = 0;
+  $ins->($u1, $base + 900 * $i++, $_, 'history') for 60, 50, (120) x 7, 200;
+  $ins->($u1, $now - 25 * 3600, 300, 'history');    # older than 24 h: not counted
+  $ins->($u1, $now - 3 * 3600, 999, 'spot');        # spot: not counted
+  $t1->get_ok('/dashboard')->status_is(200)
+    ->content_like(qr{Last 24 h:}, 'label says Last 24 h')
+    ->content_like(qr{<span class="warn">TIR 70%</span>}, 'TIR with its grade')
+    ->content_like(qr{<span class="bad">&lt;70 20%</span>}, '<70 with its grade')
+    ->content_like(qr{<span class="bad">&lt;54 10%</span>}, '<54')
+    ->content_like(qr{<span class="good">&gt;180 10%</span>}, '>180')
+    ->content_like(qr{Mean 115\b}, 'mean excludes the old reading and the spot value')
+    ->content_like(qr{Hypos 1\b}, 'one hypo event')
+    ->content_like(qr{Data 10%}, 'data share of 96 slots')
+    ->content_like(qr{Targets are for 14 days}, 'note about the targets')
+    ->text_unlike('p.last24' => qr{GMI|eA1c|CV|SD}, 'no GMI, eA1c, CV or SD in the line');
+
+  # Only a reading older than 24 h: no data.
+  my ($t2, $u2) = $mk->('l24b@b.co', 'TEST04');
+  $ins->($u2, $now - 25 * 3600, 120, 'history');
+  $t2->get_ok('/dashboard')->status_is(200)->content_like(qr{Last 24 h: no data});
+};
+
 subtest 'settings holds ingest and account' => sub {
   $t->get_ok('/dashboard/settings')->status_is(200)
     ->content_like(qr{Regenerate ingest token})->content_like(qr{Log out})

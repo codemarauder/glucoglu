@@ -59,6 +59,15 @@ sub index ($self) {
   )->hashes->to_array;
   my $dlt = @$recent ? deltas($recent, $now) : undef;
 
+  # Last 24 h summary (rolling, now minus 24 h; the graph above starts at midnight).
+  # Same rows as the AGP metrics: history and stream, no spot scans.
+  my $rows24 = $db->query(
+    'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl FROM readings
+       WHERE user_id = ? AND ts >= to_timestamp(?) AND source_type IN (\'history\', \'stream\')
+       ORDER BY ts', $target, $now - 86400
+  )->hashes->to_array;
+  my $m24 = tier1($rows24, 1);
+
   my $day  = $self->param('day') // 0;
   $day = 0 unless $day =~ /^\d+$/ && $day <= 90;
   my $dayrows = $day == 0 ? $today : $db->query(
@@ -69,20 +78,26 @@ sub index ($self) {
   my $today_svg = @$dayrows ? today_svg($dayrows, $off) : '';
 
   # Traffic-light bands (Battelino 2019 Table 2): target / partial / off-target per metric
-  my %grade = $m->{n} ? (
-    tir    => $m->{tir}    > 70   ? 'good' : $m->{tir}    >= 50  ? 'warn' : 'bad',
-    tar180 => $m->{tar180} < 25   ? 'good' : $m->{tar180} <= 50  ? 'warn' : 'bad',
-    tar250 => $m->{tar250} < 5    ? 'good' : $m->{tar250} <= 10  ? 'warn' : 'bad',
-    tbr70  => $m->{tbr70}  < 4    ? 'good' : $m->{tbr70}  <= 10  ? 'warn' : 'bad',
-    tbr54  => $m->{tbr54}  < 1    ? 'good' : $m->{tbr54}  <= 2   ? 'warn' : 'bad',
-    cv     => $m->{cv}     <= 36   ? 'good' : $m->{cv}     <= 50  ? 'warn' : 'bad',
-  ) : ();
+  my $grade = sub ($m) {
+    return $m->{n} ? (
+      tir    => $m->{tir}    > 70   ? 'good' : $m->{tir}    >= 50  ? 'warn' : 'bad',
+      tar180 => $m->{tar180} < 25   ? 'good' : $m->{tar180} <= 50  ? 'warn' : 'bad',
+      tar250 => $m->{tar250} < 5    ? 'good' : $m->{tar250} <= 10  ? 'warn' : 'bad',
+      tbr70  => $m->{tbr70}  < 4    ? 'good' : $m->{tbr70}  <= 10  ? 'warn' : 'bad',
+      tbr54  => $m->{tbr54}  < 1    ? 'good' : $m->{tbr54}  <= 2   ? 'warn' : 'bad',
+      cv     => $m->{cv}     <= 36   ? 'good' : $m->{cv}     <= 50  ? 'warn' : 'bad',
+    ) : ();
+  };
+  my %grade = $grade->($m);
+  my %g24   = $grade->($m24);
 
   $self->render(
     token        => $user->{api_token},
     count        => $count,
     m            => $m,
     g            => \%grade,
+    m24          => $m24,
+    g24          => \%g24,
     svg          => $svg,
     days         => $days,
     target       => $target,
