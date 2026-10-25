@@ -12,6 +12,8 @@ has mailer => sub ($app) { Glucoglu::Mailer->new(%{$app->config->{mail} // {}}) 
 
 sub startup ($self) {
   $self->plugin('Config');
+  die "GLUCOGLU_SECRET is not set\n"
+    if $self->mode eq 'production' && !$ENV{GLUCOGLU_SECRET};
   $self->secrets($self->config->{secrets});
   $self->sessions->secure(1) if $self->mode eq 'production';
 
