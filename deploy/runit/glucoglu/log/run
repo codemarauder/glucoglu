@@ -1,0 +1,2 @@
+#!/bin/sh
+exec chpst -u glucoglu svlogd -tt /var/log/glucoglu

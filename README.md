@@ -4,7 +4,7 @@ Self-hosted glucose monitoring and analytics. Perl / Mojolicious + PostgreSQL + 
 
 > Glucoglu: the glue for your glucose data from Juggluco.
 
-Design and scope: `libreglue-scope-design.md` (handoff v2.1). License: AGPLv3.
+Design and scope: `glucoglu-scope-design.md`. License: AGPLv3.
 
 ## What v1 contains so far
 
@@ -55,12 +55,14 @@ Nightscout-style JSON (`{"type":"sgv","date":<epoch ms>,"sgv":<value>}`, single 
     # 1. Juggluco server (cmdline) on any host, configured as mirror receiver
     ./juggluco -riP -L <label> -w <password> -G && ./juggluco    # daemon
     # 2. Phone: Mirror -> Add connection -> your host, port 8795, Scans (+Amounts)
-    # 3. Cron: export TSVs from the same data dir and import
+    # 3. Sync loop: the runit service glucoglu-import (see Deploy) runs script/libre1-sync
+    #    every 60 s. It exports both TSVs from the same data dir and imports them.
+    #    By hand:
     ./juggluco -H history.tsv && ./juggluco -S scans.tsv
     script/glucoglu-admin import history history.tsv EMAIL
     script/glucoglu-admin import spot scans.tsv EMAIL
 
-Re-running the import is safe — duplicate readings are ignored. History is the main data (~96 points/day at 15-min intervals); spot values are a bonus.
+EMAIL must be an existing user (log in once first); the import refuses an unknown address. Re-running the import is safe — duplicate readings are ignored, and rows older than the newest stored row minus 9 h are skipped. History is the main data (~96 points/day at 15-min intervals); spot values are a bonus.
 
 ## Deploy (Debian 12)
 
@@ -83,24 +85,47 @@ The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.
     sudo -u postgres createdb -O glucoglu glucoglu
     sudo -u postgres psql glucoglu -c "INSERT INTO invites (code) VALUES ('CHANGE-ME')"
 
-    # 3. Environment file /etc/glucoglu.env (root-readable only). systemd loads it
-    #    (EnvironmentFile= in deploy/glucoglu.service). Never commit real values.
-    GLUCOGLU_SECRET=<random>
-    GLUCOGLU_DB_DSN=postgresql://glucoglu:PASS@localhost/glucoglu
-    GLUCOGLU_URL=https://app.example.org
-    GLUCOGLU_SMTP_HOST=<your relay host>  GLUCOGLU_SMTP_PORT=587
-    GLUCOGLU_SMTP_USER=<credential>  GLUCOGLU_SMTP_PASS=<credential>
-    GLUCOGLU_SMTP_FROM=glucoglu@app.example.org
+    # 3. Environment: an envdir, one file per variable (first line = value), read by
+    #    runit's chpst as root. An empty file means the variable is not set.
+    #    Never commit real values.
+    mkdir -p /etc/glucoglu
+    cp -r deploy/runit/env.example /etc/glucoglu/env
+    chown -R root: /etc/glucoglu && chmod 700 /etc/glucoglu/env
+    #    Fill in: GLUCOGLU_SECRET (random), GLUCOGLU_DB_DSN, GLUCOGLU_URL,
+    #    GLUCOGLU_SMTP_HOST / _PORT / _USER / _PASS / _FROM, GLUCOGLU_LIBRE1_EMAIL
+    #    (Libre 1 only), PERL5LIB (the lib folder of perl-5.40.0@glucoglu, usually
+    #    /opt/glucoglu/.perlbrew/libs/perl-5.40.0@glucoglu/lib/perl5; see `perlbrew lib list`).
+    #    MOJO_MODE=production is already set. Keep it: without it Mojolicious runs in
+    #    development mode, the GLUCOGLU_SECRET check does not run and the session
+    #    cookie is not marked secure.
+    #    Optional: JUGGLUCO_DIR (default /opt/juggluco) for the Libre 1 sync.
 
-    # 4. systemd (adjust the perlbrew path in the unit to the installed perl version)
-    cp deploy/glucoglu.service /etc/systemd/system/
-    systemctl daemon-reload && systemctl enable --now glucoglu
+    # 4. runit (apt install runit). Web app: hypnotoad in the foreground.
+    #    Libre 1 sync loop: omit glucoglu-import if you have no Libre 1.
+    cp -r deploy/runit/glucoglu deploy/runit/glucoglu-import /etc/sv/
+    chmod +x /etc/sv/glucoglu*/run /etc/sv/glucoglu*/log/run
+    mkdir -p /var/log/glucoglu /var/log/glucoglu-import
+    chown glucoglu: /var/log/glucoglu /var/log/glucoglu-import
+    ln -s /etc/sv/glucoglu /etc/sv/glucoglu-import /etc/service/
+    #    The perl path (perl-5.40.0) is in deploy/runit/glucoglu/run,
+    #    deploy/runit/glucoglu-import/run and script/libre1-sync: change it if you
+    #    install another version.
 
     # 5. Apache: TLS + reverse proxy (get a cert for your domain, e.g. certbot --apache)
     a2enmod proxy proxy_http headers
     cp deploy/glucoglu.apache.conf /etc/apache2/sites-available/
     a2ensite glucoglu
     systemctl reload apache2
+
+### Operation
+
+    sv status glucoglu glucoglu-import      # both must show "run"
+    sv restart glucoglu                     # after a code or env change
+    sv down glucoglu-import                 # stop the sync loop (sv up to start)
+    tail /var/log/glucoglu/current          # web app log
+    tail /var/log/glucoglu-import/current   # one line per import run
+
+The import log shows one line for each import (inserted, duplicates, rejected, skipped). If the Juggluco export fails, the log shows the export output and the loop tries again after 60 s.
 
 ## DNS and mail checklist
 

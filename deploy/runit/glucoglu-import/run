@@ -1,0 +1,4 @@
+#!/bin/sh
+exec 2>&1
+chpst -u glucoglu -e /etc/glucoglu/env /opt/glucoglu/script/libre1-sync
+exec sleep 60

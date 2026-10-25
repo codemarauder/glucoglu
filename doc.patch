@@ -1,0 +1,47 @@
+diff --git a/libreglue-scope-design.md b/libreglue-scope-design.md
+index fcb1bb7..f157f67 100644
+--- a/libreglue-scope-design.md
++++ b/libreglue-scope-design.md
+@@ -86,7 +86,7 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
+     
+ *   Raw payload: one JSONB column keeps each original Juggluco payload. Audit trail and evidence for O7.
+     
+-*   Quick log marks (D17): `meals` gets `kind` (breakfast | lunch | dinner | snack, optional); `exercise` gets `intensity` (light | moderate | vigorous, optional); new table `sleep` (user ID, start, end). Times in UTC like all other data. Needs one migration (build step 5).
++*   Quick log marks (D17): `meals` gets `kind` (breakfast | lunch | dinner | snack, optional); `exercise` gets `intensity` (light | moderate | vigorous, optional), and its `ts` is the exercise start (end − `minutes`); new table `sleep` (user ID, start, end). Times in UTC like all other data. Needs one migration (build step 5).
+     
+ *   Unit rule at ingest, per glucose value (`Glucoglu::Units`, one function for the uploader and the TSV import): 2.2–27.8 → mmol/L, multiply by 18.018 → mg/dL. 40–500 → mg/dL as-is. Anything else (0, negative, non-numeric, `Inf`, or between the two ranges) → reject and log. The sensor range (40–500 mg/dL = 2.2–27.8 mmol/L) makes the two unit ranges disjoint. Checked 2026-10-25: Juggluco shows LO/HI only on screen and stores numbers; no stored value was outside 40–500.
+     
+@@ -124,7 +124,7 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
+ 
+ Base engine per handoff [1]:
+ 
+-*   Input: meal timestamp from the PWA quick log (D17). The logged time is the meal start; the user can set it back ("30 min ago") when logging after the meal.
++*   Input: meal timestamp from the PWA quick log (D17). The logged time is the meal start. When the user logs after the meal, they set the start time (date, hour and minute).
+     
+ *   Window: 1–3 h after the meal mark [1].
+     
+@@ -169,17 +169,19 @@ Clinical targets (verified):
+         
+ *   **Trend and deltas (v1 decision, revised after field review)**: the "brace for it" signal is the delta numbers, not the arrow. Display Δ1 / Δ5 / Δ15 (change over the last 1 / 5 / 15 minutes, each from readings bracketing the window, each "--" when no data brackets it). Arrow uses Dexcom thresholds on mg/dL/min slope (>=3 Double, 2-3 Single, 1-2 FortyFive, <1 Flat, mirrored down) computed from the best available basis (Delta5 if data brackets it, else Delta15 -- an approximation at NFC cadence). Doubles are genuinely rarer on Libre 1: spikes between 15-min points are invisible to the sensor, and thresholds are NOT lowered to compensate -- the deltas carry the speed information. Juggluco's own direction (uploader `direction` field; mirror TSV `Rate`/`ChangeLabel`) is preserved in readings.raw for audit (TSV import includes it); display is always computed, so it cannot disagree across sources. Nightscout returns `delta` in the display unit but classifies arrows in mg/dL/min -- we do the same.
+     
+-*   **Quick log (D17)** — one tap for each mark, like the Libre app; no other app needed:
++*   **Quick log (D17)** — like the Libre app: log now with one tap, or later with the real time:
+     
+-    *   Buttons: Meal, Exercise, Sleep. A tap logs "now". One more tap sets the time back: 15 / 30 / 60 min, or a typed time.
++    *   Every time field defaults to now. The user can change the date, hour and minute, to log after the fact (as in the Libre app). Quick choices (15 / 30 / 60 min ago) are a shortcut, not the only way.
+         
+-    *   Meal: kind is optional. The default comes from the local time (breakfast, lunch, dinner, else snack); one tap changes it. Carbs (g) and a note are optional.
++    *   Meal: one time, the meal start. Kind is optional; the default comes from the time of the meal (breakfast, lunch, dinner, else snack), and one tap changes it. Carbs (g) and a note are optional.
+         
+-    *   Exercise: duration in minutes and intensity (light / moderate / vigorous). Both optional, so a single tap still logs the mark.
++    *   Exercise: logged after it ends, because the duration is not known at the start. Fields: end time (default now) and duration (required; quick choices 15 / 30 / 45 / 60 min, or typed). Intensity (light / moderate / vigorous) is optional. Stored as start = end − duration, plus the duration.
+         
+-    *   Sleep: start and end. Two taps ("Going to sleep", "Woke up"), or both times typed. A start with no end shows as open until the next "Woke up".
++    *   Sleep: start, end and duration; the user gives any two, and the app calculates the third ("slept 7 h, woke at 06:30"). Live use: two taps, "Going to sleep" and "Woke up"; a start with no end shows as open until "Woke up". Stored as start and end.
+         
+-    *   Marks show on the Today chart at their time (meal, exercise, sleep band). The owner can edit and delete marks. Viewers see them read-only (D10).
++    *   Times in the future are rejected. A sleep or exercise end must be after its start.
++        
++    *   Marks show on the Today chart at their time (meal mark, exercise band, sleep band). The owner can edit and delete marks. Viewers see them read-only (D10).
+         
+ *   PWA dashboard, vendored JS, offline-capable.

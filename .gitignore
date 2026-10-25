@@ -1,5 +1,6 @@
 *.log
 /hypnotoad.pid
+/script/hypnotoad.pid
 *.swp
 /local
 /AGENTS.local.md

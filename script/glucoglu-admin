@@ -60,7 +60,7 @@ elsif ($cmd eq 'login') {
   print "login link (valid 10 minutes):\n$base/auth/$code\n";
 }
 elsif ($cmd eq 'import') {
-  # Libre 1 path: Juggluco mirror receiver -> "juggluco -S/-H file" TSV export -> this import (cron).
+  # Libre 1 path: Juggluco mirror receiver -> "juggluco -S/-H file" TSV export -> this import (runit loop: script/libre1-sync).
   # Columns: Sensorid nr UnixTime ISO TZ Min mg/dL [Rate ChangeLabel]. Re-running is safe: dupes are ignored.
   my ($type, $file, $email) = @args;
   die "usage: glucoglu-admin import (history|spot) FILE EMAIL\n"
