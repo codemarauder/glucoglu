@@ -24,7 +24,8 @@ $db->query("INSERT INTO invites (code) VALUES ('TEST01')");
 subtest 'login page' => sub ($t) {
   $t->get_ok('/login')->status_is(200)
     ->content_like(qr{glue for your glucose data from Juggluco})
-    ->content_like(qr{name="email"});
+    ->content_like(qr{name="email"})
+    ->content_like(qr{Not for treatment decisions}, 'disclaimer on every page (layout)');
 }, $t;
 
 subtest 'registration needs an invite' => sub ($t) {

@@ -20,6 +20,7 @@
 % }
     <%= content %>
   </div>
+  <footer class="disclaimer">Not for treatment decisions.</footer>
 </main>
 </body>
 </html>
