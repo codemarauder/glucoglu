@@ -21,13 +21,13 @@
 % if ($m24->{n}) {
 <p class="last24">
   <strong>Last 24 h:</strong>
-  <span class="<%= $g24->{tir} %>">TIR <%= sprintf('%.0f', $m24->{tir}) %>%</span> |
-  <span class="<%= $g24->{tbr70} %>">&lt;70 <%= sprintf('%.0f', $m24->{tbr70}) %>%</span> |
-  <span class="<%= $g24->{tbr54} %>">&lt;54 <%= sprintf('%.0f', $m24->{tbr54}) %>%</span> |
-  <span class="<%= $g24->{tar180} %>">&gt;180 <%= sprintf('%.0f', $m24->{tar180}) %>%</span> |
-  Mean <%= sprintf('%.0f', $m24->{mean}) %> |
-  Hypos <%= $m24->{events}{l1} %> |
-  Data <%= sprintf('%.0f', $m24->{sufficiency}) %>%
+  <span class="<%= $g24->{tir} %>">TIR: <%= sprintf('%.0f', $m24->{tir}) %>%</span> |
+  <span class="<%= $g24->{tbr70} %>">&lt;70: <%= sprintf('%.0f', $m24->{tbr70}) %>%</span> |
+  <span class="<%= $g24->{tbr54} %>">&lt;54: <%= sprintf('%.0f', $m24->{tbr54}) %>%</span> |
+  <span class="<%= $g24->{tar180} %>">&gt;180: <%= sprintf('%.0f', $m24->{tar180}) %>%</span> |
+  Mean: <%= sprintf('%.0f', $m24->{mean}) %> |
+  Hypos: <%= $m24->{events}{l1} %> |
+  Data: <%= sprintf('%.0f', $m24->{sufficiency}) %>%
   <span class="hint">Targets are for 14 days.</span>
 </p>
 % } else {
