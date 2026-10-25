@@ -1,0 +1,12 @@
+.git
+.env
+t
+local
+Juggluco
+REVIEW.md
+AGENTS.local.md
+*.md
+*.log
+*.swp
+photo_*.jpg
+hypnotoad.pid

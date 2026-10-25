@@ -1,13 +1,19 @@
 #!/bin/sh
-# Libre 1 path: export the Juggluco mirror receiver's data and import it.
-# Repeats are cheap after step 7 and safe because of the dedup.
+# Libre 1 path: export the Juggluco mirror receiver's data as TSV and import it.
+# The runit service glucoglu-import runs it every 60 s (on the host or in the container).
+# The import reads only rows newer than the last import minus 9 h, so repeats are
+# cheap, and the dedup makes them safe.
+#   GLUCOGLU_LIBRE1_EMAIL  account that receives the data (required)
+#   JUGGLUCO_DIR           folder with the juggluco binary and jugglucodata/ (default /opt/juggluco)
+#   PERL                   perl that runs glucoglu-admin (default: perl in PATH)
 set -eu
-: "${GLUCOGLU_LIBRE1_EMAIL:?set it in the envdir}"
-PERL=/opt/glucoglu/perl5/perlbrew/perls/perl-5.40.0/bin/perl
-ADMIN=/opt/glucoglu/script/glucoglu-admin
+: "${GLUCOGLU_LIBRE1_EMAIL:?set it in the environment}"
+PERL=${PERL:-perl}
+ADMIN=$(cd "$(dirname "$0")" && pwd)/glucoglu-admin
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 cd "${JUGGLUCO_DIR:-/opt/juggluco}"
+# The export prints many debug lines: show them only if it fails.
 ./juggluco -H "$TMP/history.tsv" >"$TMP/export.log" 2>&1 || { cat "$TMP/export.log"; exit 1; }
 ./juggluco -S "$TMP/scans.tsv"   >"$TMP/export.log" 2>&1 || { cat "$TMP/export.log"; exit 1; }
 "$PERL" "$ADMIN" import history "$TMP/history.tsv" "$GLUCOGLU_LIBRE1_EMAIL"

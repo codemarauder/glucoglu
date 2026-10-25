@@ -1,0 +1,12 @@
+#!/bin/sh
+# Optional Juggluco mirror receiver (the phone mirrors to port 8795).
+# Off by default: only one receiver may use the data folder. Turn it on with
+# JUGGLUCO_RECEIVER=1 and stop any receiver on the host first. Configure it once:
+#   docker exec -it -u glucoglu -w /juggluco glucoglu ./juggluco -riP -L <label> -w <password> -G
+exec 2>&1
+dir=${JUGGLUCO_DIR:-/juggluco}
+if [ "${JUGGLUCO_RECEIVER:-0}" != 1 ] || [ ! -x "$dir/juggluco" ]; then
+  exec sleep 86400
+fi
+cd "$dir" || exit 1
+exec chpst -u glucoglu ./juggluco

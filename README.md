@@ -40,7 +40,9 @@ Run on the server with the app's environment (`GLUCOGLU_DB_DSN`). No web admin i
     script/glucoglu-admin login EMAIL     # login link without mail (dev / mailbox recovery)
     script/glucoglu-admin prune           # drop expired login tokens and old mail log
 
-Cron the `prune` (e.g. daily). 
+The runit service `glucoglu-prune` runs `prune` daily (both deploy options). In the Docker container, run the commands as:
+
+    docker exec -u glucoglu glucoglu perl script/glucoglu-admin users
 
 ## Juggluco ingestion
 
@@ -64,7 +66,61 @@ Nightscout-style JSON (`{"type":"sgv","date":<epoch ms>,"sgv":<value>}`, single 
 
 EMAIL must be an existing user (log in once first); the import refuses an unknown address. Re-running the import is safe — duplicate readings are ignored, and rows older than the newest stored row minus 9 h are skipped. History is the main data (~96 points/day at 15-min intervals); spot values are a bonus.
 
-## Deploy (Debian 12)
+## Deploy
+
+Two options, with the same runit service names. In both, PostgreSQL and Apache (TLS on 443) run on the host, and Apache proxies to `127.0.0.1:3000`.
+
+- **Option A: Docker.** One container with runit inside. No Perl on the host.
+- **Option B: on the host with runit.** Perl in perlbrew.
+
+| runit service | Does |
+|---|---|
+| `glucoglu` | web app on :3000 |
+| `glucoglu-import` | Libre 1 sync (`script/libre1-sync`) every 60 s |
+| `glucoglu-prune` | daily prune of expired tokens and old mail log |
+| `juggluco-receiver` | Docker only, optional: Juggluco mirror receiver (`JUGGLUCO_RECEIVER=1`) |
+
+### Option A: Docker (runit inside the container)
+
+`Dockerfile`, `docker-compose.yml`, `deploy/docker/`. The container reaches PostgreSQL through the Docker bridge gateway `172.31.250.1` (pinned in `docker-compose.yml`).
+
+    # 1. PostgreSQL on the host
+    apt install postgresql
+    sudo -u postgres createuser glucoglu --pwprompt
+    sudo -u postgres createdb -O glucoglu glucoglu
+    # Let PostgreSQL bind the bridge address even before Docker creates the bridge (boot order):
+    echo 'net.ipv4.ip_nonlocal_bind = 1' > /etc/sysctl.d/90-glucoglu.conf && sysctl --system
+    # postgresql.conf:  listen_addresses = 'localhost,172.31.250.1'
+    # pg_hba.conf:      host  glucoglu  glucoglu  172.31.250.0/24  scram-sha-256
+    service postgresql restart
+    ufw allow in on br-glucoglu to 172.31.250.1 port 5432 proto tcp
+
+    # 2. Settings: one VAR=value per line, root-readable only. Never commit real values.
+    mkdir -p /etc/glucoglu
+    cp deploy/docker/glucoglu.env.example /etc/glucoglu/glucoglu.env
+    chmod 600 /etc/glucoglu/glucoglu.env     # then fill it in
+
+    # 3. Juggluco folder (static binary + jugglucodata/), owned by the uid the container uses
+    #    (GLUCOGLU_UID, default 1000). Put GLUCOGLU_UID and JUGGLUCO_HOST_DIR in .env if not defaults.
+    ls -ln /opt/juggluco
+
+    # 4. Build and start; the app runs its database migrations at start
+    docker compose up -d --build
+    curl -s http://127.0.0.1:3000/health          # ok
+    docker exec -u glucoglu glucoglu perl script/glucoglu-admin invite
+
+    # 5. Apache: as in option B, step 5
+
+#### Operation (Docker)
+
+    docker compose logs -f                                   # all services
+    docker exec glucoglu sv status /etc/service/*            # all must show "run"
+    docker exec glucoglu sv restart /etc/service/glucoglu-import
+    docker compose up -d --build                             # after git pull
+
+`docker stop` stops each service cleanly (`deploy/docker/entrypoint.sh`): `runsvdir` alone exits on SIGTERM and leaves its services to be killed.
+
+### Option B: on the host with runit (perlbrew)
 
 The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.g. Apache) owns TLS on 443 and proxies to hypnotoad on `127.0.0.1:3000`.
 
@@ -102,14 +158,14 @@ The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.
 
     # 4. runit (apt install runit). Web app: hypnotoad in the foreground.
     #    Libre 1 sync loop: omit glucoglu-import if you have no Libre 1.
-    cp -r deploy/runit/glucoglu deploy/runit/glucoglu-import /etc/sv/
+    #    glucoglu-prune: daily prune of expired tokens and old mail log.
+    cp -r deploy/runit/glucoglu deploy/runit/glucoglu-import deploy/runit/glucoglu-prune /etc/sv/
     chmod +x /etc/sv/glucoglu*/run /etc/sv/glucoglu*/log/run
-    mkdir -p /var/log/glucoglu /var/log/glucoglu-import
-    chown glucoglu: /var/log/glucoglu /var/log/glucoglu-import
-    ln -s /etc/sv/glucoglu /etc/sv/glucoglu-import /etc/service/
-    #    The perl path (perl-5.40.0) is in deploy/runit/glucoglu/run,
-    #    deploy/runit/glucoglu-import/run and script/libre1-sync: change it if you
-    #    install another version.
+    mkdir -p /var/log/glucoglu /var/log/glucoglu-import /var/log/glucoglu-prune
+    chown glucoglu: /var/log/glucoglu /var/log/glucoglu-import /var/log/glucoglu-prune
+    ln -s /etc/sv/glucoglu /etc/sv/glucoglu-import /etc/sv/glucoglu-prune /etc/service/
+    #    The perl path (perl-5.40.0) is in the three deploy/runit/*/run files:
+    #    change it there if you install another version.
 
     # 5. Apache: TLS + reverse proxy (get a cert for your domain, e.g. certbot --apache)
     a2enmod proxy proxy_http headers
@@ -117,9 +173,9 @@ The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.
     a2ensite glucoglu
     systemctl reload apache2
 
-### Operation
+#### Operation (host)
 
-    sv status glucoglu glucoglu-import      # both must show "run"
+    sv status glucoglu glucoglu-import glucoglu-prune   # all must show "run"
     sv restart glucoglu                     # after a code or env change
     sv down glucoglu-import                 # stop the sync loop (sv up to start)
     tail /var/log/glucoglu/current          # web app log

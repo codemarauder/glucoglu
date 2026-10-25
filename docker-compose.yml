@@ -1,0 +1,69 @@
+# Glucoglu: web app + Libre 1 sync (runit inside the container).
+# License: AGPL-3.0
+#
+# PostgreSQL and Apache (TLS on 443) run on the host. See README, section Deploy.
+#
+#   docker compose up -d --build
+#   docker compose logs -f
+#   docker compose down
+#
+# Variables for this file (shell or a .env file next to it; .env is git-ignored):
+#   GLUCOGLU_UID       uid that owns the Juggluco folder on the host (default 1000)
+#   JUGGLUCO_HOST_DIR  Juggluco folder on the host, with the binary and jugglucodata/ (default /opt/juggluco)
+
+services:
+  glucoglu:
+    build:
+      context: .
+      args:
+        APP_UID: ${GLUCOGLU_UID:-1000}
+    image: glucoglu:latest
+    container_name: glucoglu
+    restart: unless-stopped
+    init: true                 # tini as PID 1: forwards signals, reaps orphans
+    stop_grace_period: 30s     # the entrypoint waits up to 20 s for the services to stop
+
+    # Secrets and settings: one VAR=value per line, root-readable only. Template:
+    # deploy/docker/glucoglu.env.example. Never commit real values.
+    env_file: /etc/glucoglu/glucoglu.env
+    environment:
+      MOJO_MODE: production    # required: enables the GLUCOGLU_SECRET check and secure cookies
+      JUGGLUCO_DIR: /juggluco
+
+    ports:
+      # Loopback only: Apache on the host proxies to it. Docker's published ports
+      # bypass ufw, so a bare "3000:3000" would be open to the internet.
+      - "127.0.0.1:3000:3000"
+      # Only with the receiver in the container (JUGGLUCO_RECEIVER=1): the phone mirrors here.
+      # - "8795:8795"
+
+    volumes:
+      # Juggluco binary + data. Read-write: the export writes state files there.
+      - ${JUGGLUCO_HOST_DIR:-/opt/juggluco}:/juggluco
+
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+# Pinned bridge name and subnet. The host's PostgreSQL setup depends on both:
+#   listen_addresses = 'localhost,172.31.250.1'          (postgresql.conf)
+#   host glucoglu glucoglu 172.31.250.0/24 scram-sha-256 (pg_hba.conf)
+#   ufw allow in on br-glucoglu to 172.31.250.1 port 5432 proto tcp
+#   GLUCOGLU_DB_DSN=postgresql://glucoglu:PASS@172.31.250.1/glucoglu
+# Check that 172.31.250.0/24 does not collide with a VPN or another Docker network.
+networks:
+  default:
+    driver_opts:
+      com.docker.network.bridge.name: br-glucoglu
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+          gateway: 172.31.250.1

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Libre 1 sync: one export + import, then wait 60 s. runit starts it again, so runs never overlap.
+exec 2>&1
+if [ -z "${GLUCOGLU_LIBRE1_EMAIL:-}" ] || [ ! -x "${JUGGLUCO_DIR:-/juggluco}/juggluco" ]; then
+  echo "glucoglu-import: off (set GLUCOGLU_LIBRE1_EMAIL and mount the Juggluco folder at ${JUGGLUCO_DIR:-/juggluco})"
+  exec sleep 3600
+fi
+chpst -u glucoglu /app/script/libre1-sync
+exec sleep 60

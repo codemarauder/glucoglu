@@ -28,6 +28,11 @@ sub startup ($self) {
   $r->get('/')->to(cb => sub ($c) {
     $c->redirect_to($c->session('user_id') ? 'dashboard' : 'login');
   });
+  # Container health check: the app answers and the database is reachable.
+  $r->get('/health')->to(cb => sub ($c) {
+    my $ok = eval { $c->app->pg->db->query('SELECT 1'); 1 };
+    $c->render(text => $ok ? 'ok' : 'database unreachable', status => $ok ? 200 : 503);
+  });
   $r->get('/login')->to('auth#login_form')->name('login');
   $r->post('/login')->to('auth#request');
   $r->get('/login/check')->to('auth#check_form');

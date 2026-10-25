@@ -1,0 +1,7 @@
+#!/bin/sh
+# Daily: drop expired login tokens and old mail log. Retry in 5 min if the database is not ready.
+exec 2>&1
+chpst -u glucoglu -e /etc/glucoglu/env \
+  /opt/glucoglu/perl5/perlbrew/perls/perl-5.40.0/bin/perl /opt/glucoglu/script/glucoglu-admin prune \
+  || exec sleep 300
+exec sleep 86400

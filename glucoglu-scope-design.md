@@ -2,7 +2,7 @@
 
 *   **Version:** 2.2 (supersedes `project_handoff.md` v1; v2.1: storage → PostgreSQL, O1–O6/O8 resolved, caregiver sharing added; v2.2, 2026-10-25: code review fixes, Danne event rule with gap tolerance, unit rule with sensor-range limits, quick log in the PWA (D17), Juggluco treatments not ingested)
     
-*   **Status:** Metric scope verified against primary sources and approved. All decisions and open items closed. Build steps 1–4 done (§13): skeleton and login, ingest, schema, Tier 1 engine + AGP + Today view. Code review fixes done: secure tokens, production secret check, login link confirm form, event rule, unit rule, import and ingest transactions, dashboard fixes. Review items still open: runit deploy, "Last 24 h" summary line, time-weighted metrics (one source per 15-min slot). Then build step 5 (quick log + PP engine).
+*   **Status:** Metric scope verified against primary sources and approved. All decisions and open items closed. Build steps 1–4 done (§13): skeleton and login, ingest, schema, Tier 1 engine + AGP + Today view. Code review fixes done: secure tokens, production secret check, login link confirm form, event rule, unit rule, import and ingest transactions, dashboard fixes. Deploy done (D16: Docker or host runit). Review items still open: "Last 24 h" summary line, time-weighted metrics (one source per 15-min slot). Then build step 5 (quick log + PP engine).
     
 *   **Stack:** Perl / Mojolicious, PostgreSQL, PWA (vendored JS, no npm build step)
     
@@ -15,7 +15,7 @@ Maintain a lightweight, privacy-focused, zero-cloud health monitoring and web pl
 Core philosophy: minimize supply-chain attack vectors and dependency bloat. Use native, compiled source stacks (Perl/Mojolicious) over mainstream package ecosystems (npm/pip). Maintain direct, auditable control over telemetry and health data [1].
 **Build rules**
 
-*   Perl only. Mojolicious. Source installs via cpanm. Minimal CPAN beyond core. Goal: a small, auditable supply chain — not fewer features.
+*   Perl only. Mojolicious. Minimal CPAN beyond core. Goal: a small, auditable supply chain — not fewer features. On the host (D16, option B): perlbrew + cpanm. In the container (D16, option A): modules that wrap C libraries (DBD::Pg, IO::Socket::SSL) come from Debian, so they get security updates with the base image and the image needs no compiler; pure-Perl modules (Mojolicious, Mojo::Pg) come from CPAN via cpanm. Minimum versions in `cpanfile`; Mojolicious ≥ 9.48 (CVE-2026-15747).
     
 *   No npm. No pip. PWA uses vendored JS. No build step.
     
@@ -45,7 +45,7 @@ Core philosophy: minimize supply-chain attack vectors and dependency bloat. Use 
 | D13 | Time: store UTC; per-user time zone from the browser; reports convert |
 | D14 | Product: Glucoglu — "the glue for your glucose data from Juggluco" (login page). One canonical domain for app + mail; optional defensive redirect of the .com to the canonical. Juggluco name: nominative use only — factual data source, no logos, no "official" |
 | D15 | License: AGPLv3. Applies also to the hosted service. GPLv3 code can enter the project (GPLv3 §14); check Juggluco's license file only if we ever copy its code |
-| D16 | Deploy: app Perl in perlbrew (`perl-5.x@glucoglu` lib, no distro-Perl pollution). A front-end proxy (e.g. Apache) owns TLS on 443 and proxies to hypnotoad on 127.0.0.1:3000; `proxy => 1` trusts X-Forwarded-* |
+| D16 | Deploy: two options with the same runit services (`glucoglu` web app, `glucoglu-import` Libre 1 sync every 60 s, `glucoglu-prune` daily). **A: Docker** (Debian trixie-slim, runit inside, `deploy/docker/`): an entrypoint stops the services cleanly on `docker stop` (runsvdir alone exits on TERM and leaves them running); optional Juggluco receiver in the container; port 3000 published on 127.0.0.1 only (Docker's published ports bypass ufw); PostgreSQL on the host through the pinned bridge gateway. **B: host runit** (`deploy/runit/`): app Perl in perlbrew (`perl-5.x@glucoglu` lib, no distro-Perl pollution), hypnotoad in the foreground, settings in an envdir. In both, a front-end proxy (e.g. Apache) on the host owns TLS on 443 and proxies to 127.0.0.1:3000; the app trusts X-Forwarded-* |
 | D17 | Meal, exercise and sleep marks are logged in the Glucoglu PWA (quick log, §6), one tap each. Juggluco treatments (`/api/v1/treatments`) and mirror amounts (`-N` export) are not ingested in v1: Juggluco's entry UI is hard to use, and one in-app path gives one data format. Turn off sending amounts/treatments in Juggluco, so its uploader does not retry against an endpoint we do not serve |
 
 * * *
@@ -109,7 +109,7 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
 
 1.  Libre 2/2+/3 (Bluetooth stream): Juggluco's Nightscout uploader POSTs to `/api/v1/entries` (V1: `api-secret` header; V3: `/api/v2/authorization/request` handshake + Bearer). Verified against Juggluco source and live data (O7): Nightscout-style JSON, `sgv` + `date` epoch ms.
     
-2.  Libre 1 (NFC only): Juggluco's uploader pushes stream values ONLY — scans and history are never uploaded (upstream gap). Path: Juggluco mirror → Juggluco cmdline server (receiver) → `-H`/`-S` TSV exports → `glucoglu-admin import history|spot`, run by a runit loop every 60 s (`script/libre1-sync`, added with the runit deploy). The import reads only rows newer than the last import minus 9 h, in one transaction. Re-imports are safe (dedup).
+2.  Libre 1 (NFC only): Juggluco's uploader pushes stream values ONLY — scans and history are never uploaded (upstream gap). Path: Juggluco mirror → Juggluco cmdline server (receiver) → `-H`/`-S` TSV exports → `glucoglu-admin import history|spot`, run every 60 s by the runit service `glucoglu-import` (`script/libre1-sync`; host or container, D16). The import reads only rows newer than the last import minus 9 h, in one transaction. Re-imports are safe (dedup).
     
 3.  PostgreSQL ingests historical blocks and spot scans. The UNIQUE constraint on (user ID, timestamp, source type) ignores overlapping timestamps from sequential scans within the same 8-hour window [1].
     
@@ -407,4 +407,4 @@ These gaps are the product differentiation.
 
 * * *
 
-**Next action:** build steps 1–4 and the code review fixes are done (security, events, units, import, ingest, dashboard). Next, in this order: deploy with runit (sets `MOJO_MODE=production`, runs the Libre 1 sync loop), the "Last 24 h" summary line, then time-weighted metrics (review item L1; do it before trusting 30- and 90-day numbers). Then build step 5: quick log (D17), then the PP engine.
+**Next action:** build steps 1–4, the code review fixes and the deploy (D16: Docker or host runit) are done. Next, in this order: the "Last 24 h" summary line, then time-weighted metrics (review item L1; do it before trusting 30- and 90-day numbers). Then build step 5: quick log (D17), then the PP engine.

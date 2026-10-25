@@ -1,0 +1,548 @@
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..ba1dedc
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,12 @@
++.git
++.env
++t
++local
++Juggluco
++REVIEW.md
++AGENTS.local.md
++*.md
++*.log
++*.swp
++photo_*.jpg
++hypnotoad.pid
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..4897b38
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,64 @@
++# Glucoglu container
++# License: AGPL-3.0
++#
++# runit services (deploy/docker/sv/):
++#   glucoglu           web app, Mojolicious prefork on :3000 (Apache on the host owns TLS)
++#   glucoglu-import    Libre 1 sync: Juggluco TSV export + import, every 60 s
++#   glucoglu-prune     drop expired login tokens and old mail log, daily
++#   juggluco-receiver  optional Juggluco mirror receiver (off unless JUGGLUCO_RECEIVER=1)
++#
++# PostgreSQL runs on the host. See README, section Deploy.
++#
++# Build and run: docker compose up -d --build
++
++FROM debian:trixie-slim
++
++LABEL description="Glucoglu: the glue for your glucose data from Juggluco"
++LABEL license="AGPL-3.0"
++
++ENV DEBIAN_FRONTEND=noninteractive
++
++# Owner of the Juggluco data folder on the host: the export writes there.
++ARG APP_UID=1000
++
++WORKDIR /app
++COPY cpanfile /app/
++
++# Perl modules:
++# - DBD::Pg and IO::Socket::SSL wrap C libraries (libpq, OpenSSL). They come from Debian,
++#   so they get security updates with the base image, and the image needs no compiler.
++# - Mojolicious and Mojo::Pg are pure Perl and come from CPAN: Debian trixie has
++#   Mojolicious 9.39, and 9.48 fixes CVE-2026-15747 (cpanfile requires >= 9.48).
++# cpanminus and make are only needed for the install and are removed in the same layer.
++RUN apt-get update \
++ && apt-get install -y --no-install-recommends \
++      perl libdbd-pg-perl libio-socket-ssl-perl ca-certificates runit curl \
++      cpanminus make \
++ && cpanm --notest --installdeps /app \
++ && apt-get purge -y cpanminus make \
++ && apt-get autoremove -y --purge \
++ && rm -rf /var/lib/apt/lists/* /root/.cpanm
++
++RUN useradd --system --uid "$APP_UID" --home-dir /app --shell /usr/sbin/nologin glucoglu
++
++# Application code: owned by root, read-only for the app user.
++COPY glucoglu.conf glucoglu.production.conf /app/
++COPY lib/       /app/lib/
++COPY script/    /app/script/
++COPY templates/ /app/templates/
++COPY public/    /app/public/
++
++# runit services and the entrypoint.
++COPY deploy/docker/sv/          /etc/sv/
++COPY deploy/docker/entrypoint.sh /usr/local/bin/glucoglu-entrypoint
++RUN chmod 755 /app/script/* /etc/sv/*/run /usr/local/bin/glucoglu-entrypoint \
++ && mkdir -p /etc/service \
++ && ln -s /etc/sv/glucoglu /etc/sv/glucoglu-import /etc/sv/glucoglu-prune \
++          /etc/sv/juggluco-receiver /etc/service/
++
++EXPOSE 3000
++
++HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
++    CMD curl -sf http://127.0.0.1:3000/health || exit 1
++
++ENTRYPOINT ["/usr/local/bin/glucoglu-entrypoint"]
+diff --git a/README.md b/README.md
+index 6fc9f76..f274144 100644
+--- a/README.md
++++ b/README.md
+@@ -40,7 +40,9 @@ Run on the server with the app's environment (`GLUCOGLU_DB_DSN`). No web admin i
+     script/glucoglu-admin login EMAIL     # login link without mail (dev / mailbox recovery)
+     script/glucoglu-admin prune           # drop expired login tokens and old mail log
+ 
+-Cron the `prune` (e.g. daily). 
++The runit service `glucoglu-prune` runs `prune` daily (both deploy options). In the Docker container, run the commands as:
++
++    docker exec -u glucoglu glucoglu perl script/glucoglu-admin users
+ 
+ ## Juggluco ingestion
+ 
+@@ -64,7 +66,61 @@ Nightscout-style JSON (`{"type":"sgv","date":<epoch ms>,"sgv":<value>}`, single
+ 
+ EMAIL must be an existing user (log in once first); the import refuses an unknown address. Re-running the import is safe — duplicate readings are ignored, and rows older than the newest stored row minus 9 h are skipped. History is the main data (~96 points/day at 15-min intervals); spot values are a bonus.
+ 
+-## Deploy (Debian 12)
++## Deploy
++
++Two options, with the same runit service names. In both, PostgreSQL and Apache (TLS on 443) run on the host, and Apache proxies to `127.0.0.1:3000`.
++
++- **Option A: Docker.** One container with runit inside. No Perl on the host.
++- **Option B: on the host with runit.** Perl in perlbrew.
++
++| runit service | Does |
++|---|---|
++| `glucoglu` | web app on :3000 |
++| `glucoglu-import` | Libre 1 sync (`script/libre1-sync`) every 60 s |
++| `glucoglu-prune` | daily prune of expired tokens and old mail log |
++| `juggluco-receiver` | Docker only, optional: Juggluco mirror receiver (`JUGGLUCO_RECEIVER=1`) |
++
++### Option A: Docker (runit inside the container)
++
++`Dockerfile`, `docker-compose.yml`, `deploy/docker/`. The container reaches PostgreSQL through the Docker bridge gateway `172.31.250.1` (pinned in `docker-compose.yml`).
++
++    # 1. PostgreSQL on the host
++    apt install postgresql
++    sudo -u postgres createuser glucoglu --pwprompt
++    sudo -u postgres createdb -O glucoglu glucoglu
++    # Let PostgreSQL bind the bridge address even before Docker creates the bridge (boot order):
++    echo 'net.ipv4.ip_nonlocal_bind = 1' > /etc/sysctl.d/90-glucoglu.conf && sysctl --system
++    # postgresql.conf:  listen_addresses = 'localhost,172.31.250.1'
++    # pg_hba.conf:      host  glucoglu  glucoglu  172.31.250.0/24  scram-sha-256
++    service postgresql restart
++    ufw allow in on br-glucoglu to 172.31.250.1 port 5432 proto tcp
++
++    # 2. Settings: one VAR=value per line, root-readable only. Never commit real values.
++    mkdir -p /etc/glucoglu
++    cp deploy/docker/glucoglu.env.example /etc/glucoglu/glucoglu.env
++    chmod 600 /etc/glucoglu/glucoglu.env     # then fill it in
++
++    # 3. Juggluco folder (static binary + jugglucodata/), owned by the uid the container uses
++    #    (GLUCOGLU_UID, default 1000). Put GLUCOGLU_UID and JUGGLUCO_HOST_DIR in .env if not defaults.
++    ls -ln /opt/juggluco
++
++    # 4. Build and start; the app runs its database migrations at start
++    docker compose up -d --build
++    curl -s http://127.0.0.1:3000/health          # ok
++    docker exec -u glucoglu glucoglu perl script/glucoglu-admin invite
++
++    # 5. Apache: as in option B, step 5
++
++#### Operation (Docker)
++
++    docker compose logs -f                                   # all services
++    docker exec glucoglu sv status /etc/service/*            # all must show "run"
++    docker exec glucoglu sv restart /etc/service/glucoglu-import
++    docker compose up -d --build                             # after git pull
++
++`docker stop` stops each service cleanly (`deploy/docker/entrypoint.sh`): `runsvdir` alone exits on SIGTERM and leaves its services to be killed.
++
++### Option B: on the host with runit (perlbrew)
+ 
+ The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.g. Apache) owns TLS on 443 and proxies to hypnotoad on `127.0.0.1:3000`.
+ 
+@@ -102,14 +158,14 @@ The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.
+ 
+     # 4. runit (apt install runit). Web app: hypnotoad in the foreground.
+     #    Libre 1 sync loop: omit glucoglu-import if you have no Libre 1.
+-    cp -r deploy/runit/glucoglu deploy/runit/glucoglu-import /etc/sv/
++    #    glucoglu-prune: daily prune of expired tokens and old mail log.
++    cp -r deploy/runit/glucoglu deploy/runit/glucoglu-import deploy/runit/glucoglu-prune /etc/sv/
+     chmod +x /etc/sv/glucoglu*/run /etc/sv/glucoglu*/log/run
+-    mkdir -p /var/log/glucoglu /var/log/glucoglu-import
+-    chown glucoglu: /var/log/glucoglu /var/log/glucoglu-import
+-    ln -s /etc/sv/glucoglu /etc/sv/glucoglu-import /etc/service/
+-    #    The perl path (perl-5.40.0) is in deploy/runit/glucoglu/run,
+-    #    deploy/runit/glucoglu-import/run and script/libre1-sync: change it if you
+-    #    install another version.
++    mkdir -p /var/log/glucoglu /var/log/glucoglu-import /var/log/glucoglu-prune
++    chown glucoglu: /var/log/glucoglu /var/log/glucoglu-import /var/log/glucoglu-prune
++    ln -s /etc/sv/glucoglu /etc/sv/glucoglu-import /etc/sv/glucoglu-prune /etc/service/
++    #    The perl path (perl-5.40.0) is in the three deploy/runit/*/run files:
++    #    change it there if you install another version.
+ 
+     # 5. Apache: TLS + reverse proxy (get a cert for your domain, e.g. certbot --apache)
+     a2enmod proxy proxy_http headers
+@@ -117,9 +173,9 @@ The app Perl lives in perlbrew (no distro-Perl pollution). A front-end proxy (e.
+     a2ensite glucoglu
+     systemctl reload apache2
+ 
+-### Operation
++#### Operation (host)
+ 
+-    sv status glucoglu glucoglu-import      # both must show "run"
++    sv status glucoglu glucoglu-import glucoglu-prune   # all must show "run"
+     sv restart glucoglu                     # after a code or env change
+     sv down glucoglu-import                 # stop the sync loop (sv up to start)
+     tail /var/log/glucoglu/current          # web app log
+diff --git a/cpanfile b/cpanfile
+index 9d13bfe..0447fd3 100644
+--- a/cpanfile
++++ b/cpanfile
+@@ -1,4 +1,4 @@
+-requires 'Mojolicious', '>= 9.31';
++requires 'Mojolicious', '>= 9.48';    # 9.48 fixes CVE-2026-15747 (CSRF token / BREACH)
+ requires 'Mojo::Pg',    '>= 4.18';
+ requires 'DBD::Pg',     '>= 3.15';
+ requires 'IO::Socket::SSL', '>= 2.079';  # TLS for hypnotoad and STARTTLS for mail
+\ No newline at end of file
+diff --git a/deploy/docker/entrypoint.sh b/deploy/docker/entrypoint.sh
+new file mode 100755
+index 0000000..a5265fc
+--- /dev/null
++++ b/deploy/docker/entrypoint.sh
+@@ -0,0 +1,21 @@
++#!/bin/sh
++# Container PID 1 (under docker's init): run all runit services, stop them cleanly.
++#
++# runsvdir alone exits at once on SIGTERM and leaves its services running, so
++# `docker stop` would kill them hard. Here a TERM or INT first stops every service
++# (sv force-stop: TERM, then KILL after the wait), then ends runsvdir.
++SVDIR=${SVDIR:-/etc/service}
++
++runsvdir -P "$SVDIR" &
++runsvdir_pid=$!
++
++stop() {
++  sv -w 20 force-stop "$SVDIR"/* >/dev/null 2>&1
++  sv exit "$SVDIR"/* >/dev/null 2>&1
++  kill -HUP "$runsvdir_pid" 2>/dev/null
++  wait "$runsvdir_pid"
++  exit 0
++}
++trap stop TERM INT
++
++wait "$runsvdir_pid"
+diff --git a/deploy/docker/glucoglu.env.example b/deploy/docker/glucoglu.env.example
+new file mode 100644
+index 0000000..6b87c7c
+--- /dev/null
++++ b/deploy/docker/glucoglu.env.example
+@@ -0,0 +1,26 @@
++# Copy to /etc/glucoglu/glucoglu.env on the host, fill in, then:
++#   chown root:root /etc/glucoglu/glucoglu.env && chmod 600 /etc/glucoglu/glucoglu.env
++# Format: one VAR=value per line, no quotes, no spaces around "=".
++
++# Signs the session cookie. Generate: head -c 32 /dev/urandom | base64
++GLUCOGLU_SECRET=
++
++# PostgreSQL on the host, through the Docker bridge gateway (see docker-compose.yml).
++GLUCOGLU_DB_DSN=postgresql://glucoglu:PASSWORD@172.31.250.1/glucoglu
++
++# Public address (Apache, TLS). Used in login mails.
++GLUCOGLU_URL=https://app.example.org
++
++# SMTP relay for login mails. If the relay runs on the host itself, use 172.31.250.1
++# and make it listen there: 127.0.0.1 is the container, not the host.
++GLUCOGLU_SMTP_HOST=
++GLUCOGLU_SMTP_PORT=587
++GLUCOGLU_SMTP_USER=
++GLUCOGLU_SMTP_PASS=
++GLUCOGLU_SMTP_FROM=glucoglu@app.example.org
++
++# Libre 1 sync: the account that receives the Juggluco mirror data. Empty = sync off.
++GLUCOGLU_LIBRE1_EMAIL=
++
++# 1 = run the Juggluco mirror receiver in the container (stop the host receiver first).
++JUGGLUCO_RECEIVER=0
+diff --git a/deploy/docker/sv/glucoglu-import/run b/deploy/docker/sv/glucoglu-import/run
+new file mode 100755
+index 0000000..b1dc4a4
+--- /dev/null
++++ b/deploy/docker/sv/glucoglu-import/run
+@@ -0,0 +1,9 @@
++#!/bin/sh
++# Libre 1 sync: one export + import, then wait 60 s. runit starts it again, so runs never overlap.
++exec 2>&1
++if [ -z "${GLUCOGLU_LIBRE1_EMAIL:-}" ] || [ ! -x "${JUGGLUCO_DIR:-/juggluco}/juggluco" ]; then
++  echo "glucoglu-import: off (set GLUCOGLU_LIBRE1_EMAIL and mount the Juggluco folder at ${JUGGLUCO_DIR:-/juggluco})"
++  exec sleep 3600
++fi
++chpst -u glucoglu /app/script/libre1-sync
++exec sleep 60
+diff --git a/deploy/docker/sv/glucoglu-prune/run b/deploy/docker/sv/glucoglu-prune/run
+new file mode 100755
+index 0000000..691e530
+--- /dev/null
++++ b/deploy/docker/sv/glucoglu-prune/run
+@@ -0,0 +1,5 @@
++#!/bin/sh
++# Daily: drop expired login tokens and old mail log. Retry in 5 min if the database is not ready.
++exec 2>&1
++chpst -u glucoglu perl /app/script/glucoglu-admin prune || exec sleep 300
++exec sleep 86400
+diff --git a/deploy/docker/sv/glucoglu/run b/deploy/docker/sv/glucoglu/run
+new file mode 100755
+index 0000000..d98ec0f
+--- /dev/null
++++ b/deploy/docker/sv/glucoglu/run
+@@ -0,0 +1,7 @@
++#!/bin/sh
++# Web app. Listens on all container addresses; compose publishes it on 127.0.0.1:3000 only.
++# -p: trust X-Forwarded-* from the Apache front end (same as hypnotoad's proxy => 1).
++exec 2>&1
++cd /app || exit 1
++exec chpst -u glucoglu perl script/glucoglu prefork \
++  -m production -l 'http://*:3000' -w 2 -p -P /tmp/glucoglu.pid
+diff --git a/deploy/docker/sv/juggluco-receiver/run b/deploy/docker/sv/juggluco-receiver/run
+new file mode 100755
+index 0000000..4744f4b
+--- /dev/null
++++ b/deploy/docker/sv/juggluco-receiver/run
+@@ -0,0 +1,12 @@
++#!/bin/sh
++# Optional Juggluco mirror receiver (the phone mirrors to port 8795).
++# Off by default: only one receiver may use the data folder. Turn it on with
++# JUGGLUCO_RECEIVER=1 and stop any receiver on the host first. Configure it once:
++#   docker exec -it -u glucoglu -w /juggluco glucoglu ./juggluco -riP -L <label> -w <password> -G
++exec 2>&1
++dir=${JUGGLUCO_DIR:-/juggluco}
++if [ "${JUGGLUCO_RECEIVER:-0}" != 1 ] || [ ! -x "$dir/juggluco" ]; then
++  exec sleep 86400
++fi
++cd "$dir" || exit 1
++exec chpst -u glucoglu ./juggluco
+diff --git a/deploy/runit/glucoglu-import/run b/deploy/runit/glucoglu-import/run
+index 5c25c11..89268c9 100755
+--- a/deploy/runit/glucoglu-import/run
++++ b/deploy/runit/glucoglu-import/run
+@@ -1,4 +1,7 @@
+ #!/bin/sh
++# Libre 1 sync: one export + import, then wait 60 s. runit starts it again, so runs never overlap.
+ exec 2>&1
+-chpst -u glucoglu -e /etc/glucoglu/env /opt/glucoglu/script/libre1-sync
++chpst -u glucoglu -e /etc/glucoglu/env \
++  env PERL=/opt/glucoglu/perl5/perlbrew/perls/perl-5.40.0/bin/perl \
++  /opt/glucoglu/script/libre1-sync
+ exec sleep 60
+diff --git a/deploy/runit/glucoglu-prune/log/run b/deploy/runit/glucoglu-prune/log/run
+new file mode 100755
+index 0000000..2c16e19
+--- /dev/null
++++ b/deploy/runit/glucoglu-prune/log/run
+@@ -0,0 +1,2 @@
++#!/bin/sh
++exec chpst -u glucoglu svlogd -tt /var/log/glucoglu-prune
+diff --git a/deploy/runit/glucoglu-prune/run b/deploy/runit/glucoglu-prune/run
+new file mode 100755
+index 0000000..6236527
+--- /dev/null
++++ b/deploy/runit/glucoglu-prune/run
+@@ -0,0 +1,7 @@
++#!/bin/sh
++# Daily: drop expired login tokens and old mail log. Retry in 5 min if the database is not ready.
++exec 2>&1
++chpst -u glucoglu -e /etc/glucoglu/env \
++  /opt/glucoglu/perl5/perlbrew/perls/perl-5.40.0/bin/perl /opt/glucoglu/script/glucoglu-admin prune \
++  || exec sleep 300
++exec sleep 86400
+diff --git a/docker-compose.yml b/docker-compose.yml
+new file mode 100644
+index 0000000..16572d9
+--- /dev/null
++++ b/docker-compose.yml
+@@ -0,0 +1,69 @@
++# Glucoglu: web app + Libre 1 sync (runit inside the container).
++# License: AGPL-3.0
++#
++# PostgreSQL and Apache (TLS on 443) run on the host. See README, section Deploy.
++#
++#   docker compose up -d --build
++#   docker compose logs -f
++#   docker compose down
++#
++# Variables for this file (shell or a .env file next to it; .env is git-ignored):
++#   GLUCOGLU_UID       uid that owns the Juggluco folder on the host (default 1000)
++#   JUGGLUCO_HOST_DIR  Juggluco folder on the host, with the binary and jugglucodata/ (default /opt/juggluco)
++
++services:
++  glucoglu:
++    build:
++      context: .
++      args:
++        APP_UID: ${GLUCOGLU_UID:-1000}
++    image: glucoglu:latest
++    container_name: glucoglu
++    restart: unless-stopped
++    init: true                 # tini as PID 1: forwards signals, reaps orphans
++    stop_grace_period: 30s     # the entrypoint waits up to 20 s for the services to stop
++
++    # Secrets and settings: one VAR=value per line, root-readable only. Template:
++    # deploy/docker/glucoglu.env.example. Never commit real values.
++    env_file: /etc/glucoglu/glucoglu.env
++    environment:
++      MOJO_MODE: production    # required: enables the GLUCOGLU_SECRET check and secure cookies
++      JUGGLUCO_DIR: /juggluco
++
++    ports:
++      # Loopback only: Apache on the host proxies to it. Docker's published ports
++      # bypass ufw, so a bare "3000:3000" would be open to the internet.
++      - "127.0.0.1:3000:3000"
++      # Only with the receiver in the container (JUGGLUCO_RECEIVER=1): the phone mirrors here.
++      # - "8795:8795"
++
++    volumes:
++      # Juggluco binary + data. Read-write: the export writes state files there.
++      - ${JUGGLUCO_HOST_DIR:-/opt/juggluco}:/juggluco
++
++    deploy:
++      resources:
++        limits:
++          memory: 512M
++          cpus: '1.0'
++
++    logging:
++      driver: json-file
++      options:
++        max-size: "10m"
++        max-file: "5"
++
++# Pinned bridge name and subnet. The host's PostgreSQL setup depends on both:
++#   listen_addresses = 'localhost,172.31.250.1'          (postgresql.conf)
++#   host glucoglu glucoglu 172.31.250.0/24 scram-sha-256 (pg_hba.conf)
++#   ufw allow in on br-glucoglu to 172.31.250.1 port 5432 proto tcp
++#   GLUCOGLU_DB_DSN=postgresql://glucoglu:PASS@172.31.250.1/glucoglu
++# Check that 172.31.250.0/24 does not collide with a VPN or another Docker network.
++networks:
++  default:
++    driver_opts:
++      com.docker.network.bridge.name: br-glucoglu
++    ipam:
++      config:
++        - subnet: 172.31.250.0/24
++          gateway: 172.31.250.1
+diff --git a/glucoglu-scope-design.md b/glucoglu-scope-design.md
+index f157f67..e9a7511 100644
+--- a/glucoglu-scope-design.md
++++ b/glucoglu-scope-design.md
+@@ -2,7 +2,7 @@
+ 
+ *   **Version:** 2.2 (supersedes `project_handoff.md` v1; v2.1: storage → PostgreSQL, O1–O6/O8 resolved, caregiver sharing added; v2.2, 2026-10-25: code review fixes, Danne event rule with gap tolerance, unit rule with sensor-range limits, quick log in the PWA (D17), Juggluco treatments not ingested)
+     
+-*   **Status:** Metric scope verified against primary sources and approved. All decisions and open items closed. Build steps 1–4 done (§13): skeleton and login, ingest, schema, Tier 1 engine + AGP + Today view. Code review fixes done: secure tokens, production secret check, login link confirm form, event rule, unit rule, import and ingest transactions, dashboard fixes. Review items still open: runit deploy, "Last 24 h" summary line, time-weighted metrics (one source per 15-min slot). Then build step 5 (quick log + PP engine).
++*   **Status:** Metric scope verified against primary sources and approved. All decisions and open items closed. Build steps 1–4 done (§13): skeleton and login, ingest, schema, Tier 1 engine + AGP + Today view. Code review fixes done: secure tokens, production secret check, login link confirm form, event rule, unit rule, import and ingest transactions, dashboard fixes. Deploy done (D16: Docker or host runit). Review items still open: "Last 24 h" summary line, time-weighted metrics (one source per 15-min slot). Then build step 5 (quick log + PP engine).
+     
+ *   **Stack:** Perl / Mojolicious, PostgreSQL, PWA (vendored JS, no npm build step)
+     
+@@ -15,7 +15,7 @@ Maintain a lightweight, privacy-focused, zero-cloud health monitoring and web pl
+ Core philosophy: minimize supply-chain attack vectors and dependency bloat. Use native, compiled source stacks (Perl/Mojolicious) over mainstream package ecosystems (npm/pip). Maintain direct, auditable control over telemetry and health data [1].
+ **Build rules**
+ 
+-*   Perl only. Mojolicious. Source installs via cpanm. Minimal CPAN beyond core. Goal: a small, auditable supply chain — not fewer features.
++*   Perl only. Mojolicious. Minimal CPAN beyond core. Goal: a small, auditable supply chain — not fewer features. On the host (D16, option B): perlbrew + cpanm. In the container (D16, option A): modules that wrap C libraries (DBD::Pg, IO::Socket::SSL) come from Debian, so they get security updates with the base image and the image needs no compiler; pure-Perl modules (Mojolicious, Mojo::Pg) come from CPAN via cpanm. Minimum versions in `cpanfile`; Mojolicious ≥ 9.48 (CVE-2026-15747).
+     
+ *   No npm. No pip. PWA uses vendored JS. No build step.
+     
+@@ -45,7 +45,7 @@ Core philosophy: minimize supply-chain attack vectors and dependency bloat. Use
+ | D13 | Time: store UTC; per-user time zone from the browser; reports convert |
+ | D14 | Product: Glucoglu — "the glue for your glucose data from Juggluco" (login page). One canonical domain for app + mail; optional defensive redirect of the .com to the canonical. Juggluco name: nominative use only — factual data source, no logos, no "official" |
+ | D15 | License: AGPLv3. Applies also to the hosted service. GPLv3 code can enter the project (GPLv3 §14); check Juggluco's license file only if we ever copy its code |
+-| D16 | Deploy: app Perl in perlbrew (`perl-5.x@glucoglu` lib, no distro-Perl pollution). A front-end proxy (e.g. Apache) owns TLS on 443 and proxies to hypnotoad on 127.0.0.1:3000; `proxy => 1` trusts X-Forwarded-* |
++| D16 | Deploy: two options with the same runit services (`glucoglu` web app, `glucoglu-import` Libre 1 sync every 60 s, `glucoglu-prune` daily). **A: Docker** (Debian trixie-slim, runit inside, `deploy/docker/`): an entrypoint stops the services cleanly on `docker stop` (runsvdir alone exits on TERM and leaves them running); optional Juggluco receiver in the container; port 3000 published on 127.0.0.1 only (Docker's published ports bypass ufw); PostgreSQL on the host through the pinned bridge gateway. **B: host runit** (`deploy/runit/`): app Perl in perlbrew (`perl-5.x@glucoglu` lib, no distro-Perl pollution), hypnotoad in the foreground, settings in an envdir. In both, a front-end proxy (e.g. Apache) on the host owns TLS on 443 and proxies to 127.0.0.1:3000; the app trusts X-Forwarded-* |
+ | D17 | Meal, exercise and sleep marks are logged in the Glucoglu PWA (quick log, §6), one tap each. Juggluco treatments (`/api/v1/treatments`) and mirror amounts (`-N` export) are not ingested in v1: Juggluco's entry UI is hard to use, and one in-app path gives one data format. Turn off sending amounts/treatments in Juggluco, so its uploader does not retry against an endpoint we do not serve |
+ 
+ * * *
+@@ -109,7 +109,7 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
+ 
+ 1.  Libre 2/2+/3 (Bluetooth stream): Juggluco's Nightscout uploader POSTs to `/api/v1/entries` (V1: `api-secret` header; V3: `/api/v2/authorization/request` handshake + Bearer). Verified against Juggluco source and live data (O7): Nightscout-style JSON, `sgv` + `date` epoch ms.
+     
+-2.  Libre 1 (NFC only): Juggluco's uploader pushes stream values ONLY — scans and history are never uploaded (upstream gap). Path: Juggluco mirror → Juggluco cmdline server (receiver) → `-H`/`-S` TSV exports → `glucoglu-admin import history|spot`, run by a runit loop every 60 s (`script/libre1-sync`, added with the runit deploy). The import reads only rows newer than the last import minus 9 h, in one transaction. Re-imports are safe (dedup).
++2.  Libre 1 (NFC only): Juggluco's uploader pushes stream values ONLY — scans and history are never uploaded (upstream gap). Path: Juggluco mirror → Juggluco cmdline server (receiver) → `-H`/`-S` TSV exports → `glucoglu-admin import history|spot`, run every 60 s by the runit service `glucoglu-import` (`script/libre1-sync`; host or container, D16). The import reads only rows newer than the last import minus 9 h, in one transaction. Re-imports are safe (dedup).
+     
+ 3.  PostgreSQL ingests historical blocks and spot scans. The UNIQUE constraint on (user ID, timestamp, source type) ignores overlapping timestamps from sequential scans within the same 8-hour window [1].
+     
+@@ -407,4 +407,4 @@ These gaps are the product differentiation.
+ 
+ * * *
+ 
+-**Next action:** build steps 1–4 and the code review fixes are done (security, events, units, import, ingest, dashboard). Next, in this order: deploy with runit (sets `MOJO_MODE=production`, runs the Libre 1 sync loop), the "Last 24 h" summary line, then time-weighted metrics (review item L1; do it before trusting 30- and 90-day numbers). Then build step 5: quick log (D17), then the PP engine.
++**Next action:** build steps 1–4, the code review fixes and the deploy (D16: Docker or host runit) are done. Next, in this order: the "Last 24 h" summary line, then time-weighted metrics (review item L1; do it before trusting 30- and 90-day numbers). Then build step 5: quick log (D17), then the PP engine.
+diff --git a/lib/Glucoglu.pm b/lib/Glucoglu.pm
+index 93c6cdb..614d868 100644
+--- a/lib/Glucoglu.pm
++++ b/lib/Glucoglu.pm
+@@ -28,6 +28,11 @@ sub startup ($self) {
+   $r->get('/')->to(cb => sub ($c) {
+     $c->redirect_to($c->session('user_id') ? 'dashboard' : 'login');
+   });
++  # Container health check: the app answers and the database is reachable.
++  $r->get('/health')->to(cb => sub ($c) {
++    my $ok = eval { $c->app->pg->db->query('SELECT 1'); 1 };
++    $c->render(text => $ok ? 'ok' : 'database unreachable', status => $ok ? 200 : 503);
++  });
+   $r->get('/login')->to('auth#login_form')->name('login');
+   $r->post('/login')->to('auth#request');
+   $r->get('/login/check')->to('auth#check_form');
+diff --git a/script/libre1-sync b/script/libre1-sync
+index d9dbb4f..10787f8 100755
+--- a/script/libre1-sync
++++ b/script/libre1-sync
+@@ -1,13 +1,19 @@
+ #!/bin/sh
+-# Libre 1 path: export the Juggluco mirror receiver's data and import it.
+-# Repeats are cheap after step 7 and safe because of the dedup.
++# Libre 1 path: export the Juggluco mirror receiver's data as TSV and import it.
++# The runit service glucoglu-import runs it every 60 s (on the host or in the container).
++# The import reads only rows newer than the last import minus 9 h, so repeats are
++# cheap, and the dedup makes them safe.
++#   GLUCOGLU_LIBRE1_EMAIL  account that receives the data (required)
++#   JUGGLUCO_DIR           folder with the juggluco binary and jugglucodata/ (default /opt/juggluco)
++#   PERL                   perl that runs glucoglu-admin (default: perl in PATH)
+ set -eu
+-: "${GLUCOGLU_LIBRE1_EMAIL:?set it in the envdir}"
+-PERL=/opt/glucoglu/perl5/perlbrew/perls/perl-5.40.0/bin/perl
+-ADMIN=/opt/glucoglu/script/glucoglu-admin
++: "${GLUCOGLU_LIBRE1_EMAIL:?set it in the environment}"
++PERL=${PERL:-perl}
++ADMIN=$(cd "$(dirname "$0")" && pwd)/glucoglu-admin
+ TMP=$(mktemp -d)
+ trap 'rm -rf "$TMP"' EXIT
+ cd "${JUGGLUCO_DIR:-/opt/juggluco}"
++# The export prints many debug lines: show them only if it fails.
+ ./juggluco -H "$TMP/history.tsv" >"$TMP/export.log" 2>&1 || { cat "$TMP/export.log"; exit 1; }
+ ./juggluco -S "$TMP/scans.tsv"   >"$TMP/export.log" 2>&1 || { cat "$TMP/export.log"; exit 1; }
+ "$PERL" "$ADMIN" import history "$TMP/history.tsv" "$GLUCOGLU_LIBRE1_EMAIL"
+diff --git a/t/health.t b/t/health.t
+new file mode 100644
+index 0000000..d177dea
+--- /dev/null
++++ b/t/health.t
+@@ -0,0 +1,15 @@
++use Mojo::Base -strict, -signatures;
++
++use Test::More;
++plan skip_all => 'set GLUCOGLU_DB_DSN to run against PostgreSQL' unless $ENV{GLUCOGLU_DB_DSN};
++
++use Test::Mojo;
++my $t = Test::Mojo->new('Glucoglu');
++
++$t->get_ok('/health')->status_is(200)->content_is('ok');
++
++# Database gone: 503, so the container health check fails.
++$t->app->pg(Mojo::Pg->new('postgresql://nobody:x@127.0.0.1:1/none'));
++$t->get_ok('/health')->status_is(503)->content_is('database unreachable');
++
++done_testing;
