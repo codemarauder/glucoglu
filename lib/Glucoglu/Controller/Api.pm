@@ -44,6 +44,7 @@ sub entries ($self) {
 
   my @items = ref $json eq 'ARRAY' ? @$json : ref $json eq 'HASH' ? ($json) : ();
   my ($inserted, $rejected, $parsed, $from, $to) = (0, 0, 0, undef, undef);
+  my $tx = $db->begin;    # one commit per batch; a failure mid-batch leaves none of it
   for my $item (@items) {
     next unless ref $item eq 'HASH';
     my ($value, $ts) = ($item->{sgv}, $item->{date});
@@ -69,6 +70,7 @@ sub entries ($self) {
       $uid, $ts / 1000, $mgdl, encode_json($item)
     )->rows;
   }
+  $tx->commit;
 
   # O7: keep bodies we could not read at all, so the real field names can be confirmed before schema freeze.
   # Dedup conflicts and understood-but-rejected values are not captured; they are normal traffic.
