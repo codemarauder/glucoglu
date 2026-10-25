@@ -2,7 +2,7 @@
 
 *   **Version:** 2.1 (supersedes `project_handoff.md` v1; v2.1: storage → PostgreSQL, O1–O6/O8 resolved, caregiver sharing added)
     
-*   **Status:** Metric scope verified against primary sources and approved. All decisions closed except O7 (real Juggluco payload, build step 2). Ready for build.
+*   **Status:** Metric scope verified against primary sources and approved. All decisions and open items closed. Build steps 1–4 done (§13): skeleton and login, ingest, schema, Tier 1 engine + AGP + Today view. Build step 5 (PP engine) is next.
     
 *   **Stack:** Perl / Mojolicious, PostgreSQL, PWA (vendored JS, no npm build step)
     
@@ -31,7 +31,7 @@ Core philosophy: minimize supply-chain attack vectors and dependency bloat. Use 
 | # | Decision |
 | --- | --- |
 | D1 | Multi-tenant from the start |
-| D2 | Ingest = Juggluco raw JSON POST to our own REST endpoint `/api/v1/entries` [1]. Not the Nightscout API. Raw JSON gives full schema control |
+| D2 | Ingest = Juggluco's Nightscout uploader (V1 `api-secret` header or V3 Bearer) POSTs Nightscout-style JSON (`type`, `date` in ms, `sgv`) to our own endpoint `/api/v1/entries` (§4). We do not run a full Nightscout server. Libre 1 history and scans come by TSV import (§4, item 2). The raw payload stays in JSONB, so schema control stays with us |
 | D3 | Sensor scope: Libre 1 (NFC) + Libre 2 / 2+ / 3 (Bluetooth streaming) |
 | D4 | Registration by invite code. Email address only. No real names |
 | D5 | Billing hooks/stubs in v1. Payment implementation deferred |
@@ -80,6 +80,8 @@ Every reading carries: user ID, timestamp, glucose value, source type (history b
 *   One instance stores everything: users, invite codes, login tokens, readings, meals, insulin, IOB, exercise, notes, lab A1c, shares. One backup, one restore.
     
 *   Dedup: UNIQUE (user ID, timestamp, source type) + ON CONFLICT DO NOTHING. Immediate and deterministic. No background merges, so a query right after insert can never count one reading twice.
+    
+*   Dedup check for Libre 1 history (2026-10-25): history timestamps do not change between exports. A repeat import after a new export gave 0 new rows and 28,052 duplicates. The exact-timestamp key stays. Fallback, only if duplicate sensor minutes ever appear: key history on sensor + sensor minute (TSV `Sensorid` + `Min`).
     
 *   Raw payload: one JSONB column keeps each original Juggluco payload. Audit trail and evidence for O7.
     
@@ -186,8 +188,8 @@ Unit pairs (mg/dL = mmol/L): 70 = 3.9, 54 = 3.0, 63 = 3.5, 140 = 7.8, 180 = 10.0
 | 7 | GMI | `% = 3.31 + 0.02392×mean [mg/dL]`; IFCC: `mmol/mol = 12.71 + 4.70587×mean [mmol/L]` | — | Bergenstal 2018, _Diabetes Care_ 41(11):2275–2280 | Any; use ≥14 days. Note: formula derived from Dexcom data; sensor-bias caveat per source |
 | 8 | eA1c (ADAG) | `A1c% = (mean+46.7)/28.7 [mg/dL]` | — | Nathan 2008, _Diabetes Care_ 31(8):1473–1478 | Any |
 | 9 | AGP | percentiles 5/25/50/75/95 by time of day, 14 days | — | Mazze 1987; Bergenstal 2013, _Diabetes Technol Ther_ 15(3):198–211 | Any |
-| 10 | Data sufficiency | ≥70% of 14 days; alternative: 10 days at 80–100% | — | Battelino 2019; Battelino 2023, _Lancet Diabetes Endocrinol_ 11:42–57 | Any |
-| 11 | Hypo/hyper events | Event starts: ≥15 min below threshold. Ends: ≥15 min at/above exit (L1 exit ≥70; L2 exit ≥54). Extended hypo <70: >120 min. Extended hyper >250: ≥90 cumulative min within 120 min | — | Danne 2017, _Diabetes Care_ 40(12):1631–1640; Battelino 2023 Table 4 | 1-min best |
+| 10 | Data sufficiency | ≥70% of 14 days; alternative: 10 days at 80–100%. Measured as filled 15-min slots / (days × 96); a slot is filled if it holds at least one reading. Reading counts are not used | — | Battelino 2019; Battelino 2023, _Lancet Diabetes Endocrinol_ 11:42–57 | Any |
+| 11 | Hypo/hyper events | Event starts: ≥15 min below threshold. Ends: ≥15 min at/above exit (L1 exit ≥70; L2 exit ≥54). Extended hypo <70: >120 min. Extended hyper >250: ≥90 cumulative min within 120 min. A gap of more than 20 min between readings (one missing 15-min point plus jitter) breaks the run. An event that a gap or the end of the data closes counts if the time beyond the threshold is ≥15 min; with no recovery seen, that time runs from the first to the last reading beyond the threshold | — | Danne 2017, _Diabetes Care_ 40(12):1631–1640; Battelino 2023 Table 4 | 1-min best |
 
 ### Tier 2 — Population profiles (all in v1; threshold presets only, no extra code)
 
@@ -207,8 +209,8 @@ Unit pairs (mg/dL = mmol/L): 70 = 3.9, 54 = 3.0, 63 = 3.5, 140 = 7.8, 180 = 10.0
 | 18 | PP iAUC | trapezoid integral of `max(G − baseline, 0)` | Brouns 2005, _Nutr Res Rev_ 18:145–171; meal-synchronized profiles: Rodbard 2018, _Diabetes Technol Ther_ 20(S2) | As row 15 |
 | 19 | GMI − lab A1c gap | track gap over time; user enters lab A1c. Real-world discordance: ≥0.5 pp in 50%, ≥1.0 pp in 22% (trials: 28% and 3%) | Bergenstal 2018 Table 3; Perlman 2021, _Diabetes Technol Ther_ 23(4):253–258 | Any; lab entry required |
 | 20 | LBGI / HBGI | `f(x) = 1.509×((ln x)^1.084 − 5.381)` [x in mg/dL]; `r(x) = 22.77×f(x)²`; LBGI = mean of r over readings ≤112.5; HBGI over >112.5. Zones: LBGI <2.5 low, 2.5–5 moderate, >5 high | Kovatchev 2019, _J Diabetes Sci Technol_ 13(4):627–635; validation: Kovatchev 1998, _Diabetes Care_ 21:1870–1875; constant: Gaynanova 2018, _Diabetes Technol Ther_ 20(4):317 | Any |
-| 25 | Scan gap alarm | warn as `now − last scan` nears the 8-hour buffer [1]. Consensus: min 3 scans/day, ≤8 h apart. Warn threshold default 6.5 h (tunable) | Buffer [1]; rule: Battelino 2023; scan frequency ↔ outcomes: Dunn 2018, _Diabetes Res Clin Pract_ 137:37–46 | NFC only |
-| 26 | Data completeness | `captured / expected` (96/day NFC; 1,440/day stream) | Project-specific; consensus requires reporting % data obtained (Battelino 2023) | Both |
+| 25 | Scan gap alarm | warn as `now − last scan` nears the 8-hour buffer [1]. Consensus: min 3 scans/day, ≤8 h apart. Warn threshold default 6.5 h (tunable). Based on the last spot scan. Delivery: email through the existing SMTP relay (D9); Web Push is out because it needs crypto modules, against the build rules. The import also records when it last ran: if that time is stale, the alarm reports a stopped sync, not a missed scan | Buffer [1]; rule: Battelino 2023; scan frequency ↔ outcomes: Dunn 2018, _Diabetes Res Clin Pract_ 137:37–46 | NFC only |
+| 26 | Data completeness | filled 15-min slots / (days × 96), the same measure as row 10. A slot is filled if it holds at least one reading, so NFC (96/day) and stream (1,440/day) users use one scale | Project-specific; consensus requires reporting % data obtained (Battelino 2023) | Both |
 | 29 | Dawn phenomenon | `Δ = G(pre-breakfast) − G(nadir)`, per day on complete nights. Present if Δ > 20 mg/dL. Median T2D magnitude ~16 mg/dL; adds ~0.4 pp to HbA1c | Monnier 2013, _Diabetes Care_ 36(12):4057–4062; commentary: Porcellati 2013, 36(12):3860–3862 | Any; nights with gaps → invalid |
 | 31 | GRI | `3.0×%VLow + 2.4×%Low + 1.6×%VHigh + 0.8×%High`. Scale 0 (best) to 100 (worst). GRI grid display | Klonoff 2022, _J Diabetes Sci Technol_, doi:10.1177/19322968221085273; emerging metric per Battelino 2023 and APAC consensus (Kong 2023, _Diabetes Res Clin Pract_) | Any |
 
@@ -252,6 +254,8 @@ Unit pairs (mg/dL = mmol/L): 70 = 3.9, 54 = 3.0, 63 = 3.5, 140 = 7.8, 180 = 10.0
 *   Billing hooks/stubs in v1: account tier field, feature-flag stubs. No payment processing.
     
 *   Public VPS with TLS.
+
+*   The app shows "Not for treatment decisions".
 
 *   Operator maintenance via `script/glucoglu-admin` CLI (invites, user list, right-to-delete, prune of expired tokens and old mail log). No web admin in v1; the operator is the admin.
     
@@ -384,4 +388,4 @@ These gaps are the product differentiation.
 
 * * *
 
-**Next action:** step 1 is code-complete; `t/login.t` passes the full auth flow against Postgres 17. Deploy to the VPS (README, section Deploy), then start build step 2: the `/api/v1/entries` ingest endpoint + one real Juggluco payload capture (O7) before the schema freeze.
+**Next action:** build steps 1–4 are done and the review fixes for security, data and Libre 1 import are in. Next is build step 5: the PP engine and its extensions (§5).
