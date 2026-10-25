@@ -32,7 +32,7 @@ sub startup ($self) {
   $r->post('/login')->to('auth#request');
   $r->get('/login/check')->to('auth#check_form');
   $r->post('/login/check')->to('auth#verify');
-  $r->get('/auth/:code')->to('auth#verify');
+  $r->get('/auth/:code')->to('auth#check_form');    # GET never uses the token: mail scanners open links
   $r->post('/logout')->to('auth#logout');
   $r->post('/api/v1/entries')->to('api#entries');
   $r->post('/api/v3/entries')->to('api#entries');

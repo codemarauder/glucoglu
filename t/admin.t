@@ -49,7 +49,9 @@ subtest 'login link works without mail' => sub {
   ok !$?, 'login exits 0';
   my ($code) = $out =~ m{/auth/([A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5})};
   ok $code, 'prints a login link';
-  $t->get_ok("/auth/$code")->status_is(302);
+  $t->get_ok("/auth/$code")->status_is(200);    # the link opens the confirm form
+  $t->get_ok('/dashboard')->status_is(302);      # not logged in yet
+  $t->post_ok('/login/check' => form => {code => $code})->status_is(302);
   $t->get_ok('/dashboard')->status_is(200);
 }, $one;
 

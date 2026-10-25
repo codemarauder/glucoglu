@@ -12,6 +12,7 @@ plan skip_all => 'set GLUCOGLU_DB_DSN to a throwaway Postgres DSN (e.g. postgres
   sub send_login ($self, $email, $code, $url) { push @{$self->codes}, [$email, $code, $url]; return 1 }
 }
 
+use Digest::SHA 'sha256_hex';
 use Test::Mojo;
 my $t = Test::Mojo->new('Glucoglu');
 $t->app->mailer(Glucoglu::Mailer::Fake->new);
@@ -35,17 +36,43 @@ subtest 'registration needs an invite' => sub ($t) {
   ok @{$t->app->mailer->codes} == 1, 'one mail sent';
   is $t->app->mailer->codes->[0][0], 'a@b.co', 'mail goes to the right address';
   is length($db->query("SELECT api_token FROM users WHERE email = 'a\@b.co'")->array->[0]), 12, '12-char ingest token';
+  $t->get_ok('/login/check')->status_is(200)
+    ->content_like(qr{We sent a link and a code to <b>a\@b\.co</b>})
+    ->content_like(qr{action="/login/check"});
 }, $t;
 
-subtest 'link logs in, code is single use' => sub ($t) {
+subtest 'link opens a form; only POST logs in' => sub ($t) {
   my $code = $t->app->mailer->codes->[0][1];
   like $code, qr/^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/, 'code format';
-  $t->get_ok("/auth/$code")->status_is(302);
+  my $unused = sub { $db->query('SELECT used_at IS NULL FROM login_tokens WHERE code = ?',
+    sha256_hex($code =~ s/-//gr))->array->[0] };
+
+  # A mail scanner opens the link, even more than once: nothing is used up.
+  for (1 .. 2) {
+    $t->get_ok("/auth/$code")->status_is(200)
+      ->content_like(qr{name="code" value="$code"}, 'code is filled in')
+      ->content_like(qr{<form method="post" action="/login/check">}, 'form posts to a fixed address')
+      ->content_unlike(qr{We sent a link}, 'no "we sent" line when coming from the link');
+    ok $unused->(), 'GET does not use the token';
+    $t->get_ok('/dashboard')->status_is(302);    # still logged out
+  }
+
+  # The user presses the button.
+  $t->post_ok('/login/check' => form => {code => $code})->status_is(302);
+  ok !$unused->(), 'POST uses the token';
   $t->get_ok('/dashboard')->status_is(200)->content_like(qr{readings stored});
+
   $t->post_ok('/logout')->status_is(302);
   $t->get_ok('/dashboard')->status_is(302);    # back to login
-  $t->get_ok("/auth/$code")->status_is(302);  # reuse bounces to login
+  $t->post_ok('/login/check' => form => {code => $code})->status_is(302);    # reuse bounces to login
   $t->get_ok('/dashboard')->status_is(302);
+}, $t;
+
+subtest 'link page shows nothing but a clean code' => sub ($t) {
+  $t->get_ok('/auth/%3Cscript%3Ealert(1)%3C')->status_is(200)
+    ->content_unlike(qr{<script>alert}i, 'junk in the link is not reflected');
+  $t->get_ok('/auth/abcde-fghjk')->status_is(200)
+    ->content_like(qr{value="ABCDE-FGHJK"}, 'code is upper-cased and formatted');
 }, $t;
 
 subtest 'typed code works too, expiry is enforced' => sub ($t) {

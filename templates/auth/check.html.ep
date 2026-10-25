@@ -1,8 +1,15 @@
 % layout 'default';
 % title 'Check your mail';
-<p>We sent a link and a code to <b><%= flash 'sent_to' %></b>.</p>
+% my $code = stash('code') // '';
+% if (my $sent = flash 'sent_to') {
+<p>We sent a link and a code to <b><%= $sent %></b>.</p>
+% }
+% if (length $code) {
+<p>Press the button to log in.</p>
+% } else {
 <p>Open the link &mdash; or type the code here:</p>
-<form method="post" action="<%= url_for %>">
-  <input name="code" placeholder="XXXXX-XXXXX" autocomplete="off" autofocus>
+% }
+<form method="post" action="<%= url_for('/login/check') %>">
+  <input name="code" value="<%= $code %>" placeholder="XXXXX-XXXXX" autocomplete="off" autofocus>
   <button>Log in</button>
 </form>

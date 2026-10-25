@@ -75,7 +75,14 @@ sub request ($self) {
   $self->redirect_to('/login/check');
 }
 
-sub check_form ($self) { $self->render('auth/check') }
+# Shows the code form. Opened from the mailed link (/auth/:code) the code is filled in,
+# but only the POST in verify() uses the token: mail scanners that open links change nothing.
+sub check_form ($self) {
+  my $code = uc($self->stash('code') // '');
+  $code =~ s/[^A-Z2-9]//g;    # same clean-up as verify(); nothing else is shown back
+  $code = substr($code, 0, 5) . '-' . substr($code, 5) if length($code) == 10;
+  $self->render('auth/check', code => $code);
+}
 
 sub verify ($self) {
   my $in = uc $self->param('code') // '';
