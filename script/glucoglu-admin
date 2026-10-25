@@ -1,9 +1,11 @@
 #!/usr/bin/env perl
 use Mojo::Base -strict, -signatures;
+use FindBin;
+use lib "$FindBin::Bin/../lib";
 use Mojo::Pg;
 use Mojo::JSON 'encode_json';
-use Mojo::Util 'md5_sum';
 use Digest::SHA 'sha256_hex';
+use Glucoglu::Random 'token';
 
 # Operator maintenance. Run on the server with the app's environment
 # (GLUCOGLU_DB_DSN). No web admin in v1; this is the admin panel.
@@ -16,7 +18,7 @@ my ($cmd, @args) = @ARGV;
 $cmd //= '';    # bare invocation falls through to usage without undef warnings
 
 if ($cmd eq 'invite') {
-  my $code = $args[0] // 'GLU-' . substr(md5_sum(rand() . $$ . time), 0, 8);
+  my $code = $args[0] // 'GLU-' . token(8);
   $pg->db->query('INSERT INTO invites (code) VALUES (?)', $code);
   print "invite code: $code\n";
 }
@@ -46,11 +48,10 @@ elsif ($cmd eq 'login') {
   die "usage: glucoglu-admin login EMAIL\n" unless $email;
   my $db = $pg->db;
   $db->query('INSERT INTO users (email, api_token) VALUES (?, ?) ON CONFLICT (email) DO NOTHING',
-    $email, substr(md5_sum(rand() . $$ . time), 0, 20));
+    $email, token(12));
   my $uid = $db->query('SELECT id FROM users WHERE email = ?', $email)->arrays->[0][0]
     or die "no such user: $email\n";
-  my @ALPHA   = ('A' .. 'H', 'J' .. 'N', 'P' .. 'Z', 2 .. 9);    # same alphabet as the mailed codes
-  my $raw     = join '', map { $ALPHA[int rand @ALPHA] } 1 .. 10;
+  my $raw     = token(10);    # same alphabet as the mailed codes
   my $code    = substr($raw, 0, 5) . '-' . substr($raw, 5);
   $db->query("INSERT INTO login_tokens (code, user_id, expires_at) VALUES (?, ?, now() + interval '10 minutes')",
     sha256_hex($raw), $uid);    # the app hashes the dash-stripped code
@@ -65,7 +66,7 @@ elsif ($cmd eq 'import') {
     unless defined($type) && defined($file) && defined($email) && $type =~ /^(history|spot)$/;
   my $db = $pg->db;
   $db->query('INSERT INTO users (email, api_token) VALUES (?, ?) ON CONFLICT (email) DO NOTHING',
-    $email, substr(md5_sum(rand() . $$ . time), 0, 20));
+    $email, token(12));
   my $uid = $db->query('SELECT id FROM users WHERE email = ?', $email)->arrays->[0][0]
     or die "no such user: $email\n";
   open my $fh, '<', $file or die "cannot open $file: $!\n";

@@ -2,10 +2,8 @@ package Glucoglu;
 use Mojo::Base 'Mojolicious', -signatures;
 
 use Glucoglu::Mailer;
+use Glucoglu::Random ();
 use Mojo::Pg;
-
-# Codes use the alphabet without I, O, 0, 1 so that humans cannot misread them.
-my @ALPHABET = ('A' .. 'H', 'J' .. 'N', 'P' .. 'Z', 2 .. 9);
 
 has pg => sub ($app) { Mojo::Pg->new($app->config->{db}{dsn}) };
 
@@ -19,7 +17,7 @@ sub startup ($self) {
 
   # 12 chars from the 32-symbol alphabet = 2^60: not brute-forceable online, still typeable on a phone.
   $self->helper(gen_token => sub ($c, $len = 12) {
-    join '', map { $ALPHABET[int rand @ALPHABET] } 1 .. $len;
+    Glucoglu::Random::token($len);
   });
 
   $self->pg->migrations->from_data->migrate;
