@@ -9,6 +9,7 @@ use Glucoglu::Metrics qw(agp agp_svg deltas tier1 today_svg tz_offset);
 sub _target ($self) {
   my $uid    = $self->session('user_id');
   my $target = $self->param('user_id') // $uid;
+  return undef unless $target =~ /^\d+$/;    # not a user id: not found, never sent to the database
   return $target if $target == $uid;
   return $target
     if $self->app->pg->db->query('SELECT 1 FROM shares WHERE owner_id = ? AND viewer_id = ?', $target, $uid)->array;

@@ -92,6 +92,11 @@ subtest 'deltas look back 30 min past midnight' => sub {
     ->content_like(qr{15mins</strong>\s*\+15 mg/dL}, 'delta 15 reaches back over midnight');
 };
 
+subtest 'non-numeric user_id is not found, not 500' => sub {
+  $t->get_ok('/dashboard?user_id=abc')->status_is(404);
+  $t->get_ok('/dashboard?user_id=1%20OR%201%3D1')->status_is(404, 'no SQL reaches the database');
+};
+
 subtest 'settings holds ingest and account' => sub {
   $t->get_ok('/dashboard/settings')->status_is(200)
     ->content_like(qr{Regenerate ingest token})->content_like(qr{Log out})
