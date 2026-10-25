@@ -43,8 +43,10 @@ subtest 'events (Danne 2017)' => sub {
   is events($seq->(100, 65, 65, 65, 75))->{l2},   0, 'not deep enough for L2';
 
   my $with_gap = [map {{ts => $_, mg_dl => $_ < 2700 ? 60 : 75}} 0, 900, 1800, 9000, 9900, 10800];
-  # 3 readings below 70, then a 90-min gap breaks continuity before recovery
-  is events($with_gap)->{l1}, 0, 'gap >15 min closes an event without counting it';
+  # 3 readings below 70 (30 min), then a 2-h gap before recovery: the hypo still happened
+  is events($with_gap)->{l1}, 1, 'gap during a hypo closes it and still counts it';
+  my $one_low_gap = [map {{ts => $_, mg_dl => $_ == 900 ? 60 : 100}} 0, 900, 9000];
+  is events($one_low_gap)->{l1}, 0, 'one low reading before a gap is not 15 min below';
 
   my $deep = events($seq->((100) x 2, 40, 40, 40, 60, 75));
   is $deep->{l2}, 1, 'L2 exits at >=54 even below 70';
@@ -56,6 +58,36 @@ subtest 'events (Danne 2017)' => sub {
   my $hyper = events($seq->(100, 260, 260, 260, 240));
   is $hyper->{hyper},     1, '45 min above 250 = one hyper event';
   is $hyper->{ext_hyper}, 0, 'not extended';
+};
+
+subtest 'events: timestamp jitter (Libre 1 history)' => sub {
+  my @v   = (100, 65, 65, 65, 75, 80);
+  my $jit = [map {{ts => $_ * 900 + ($_ % 2 ? 2 : 0), mg_dl => $v[$_]}} 0 .. $#v];
+  is events($jit)->{l1}, 1, '45-min hypo with 2 s jitter is one event';
+  my $missing = [grep { $_->{ts} != 2700 } map {{ts => $_ * 900, mg_dl => $v[$_]}} 0 .. $#v];
+  is events($missing)->{l1}, 1, 'one missing 15-min point does not break the event';
+};
+
+subtest 'events: Danne exit rule (15 min at the exit level)' => sub {
+  my $flicker = [map {{ts => $_ * 60, mg_dl => ($_ >= 10 && $_ < 70) ? ($_ == 40 ? 71 : 60) : 100}} 0 .. 90];
+  is events($flicker)->{l1}, 1, '60 min below 70 with one reading of 71 is one event, not two';
+
+  my $two = [map {{ts => $_ * 60, mg_dl => ($_ >= 10 && $_ < 30) || ($_ >= 50 && $_ < 70) ? 60 : 100}} 0 .. 90];
+  is events($two)->{l1}, 2, '20 min at 100 between two hypos: two events';
+
+  my $short_rec = [map {{ts => $_ * 60, mg_dl => ($_ >= 10 && $_ < 30) || ($_ >= 40 && $_ < 60) ? 60 : 100}} 0 .. 90];
+  is events($short_rec)->{l1}, 1, 'only 10 min at 100 between two dips: one event';
+
+  my $ext = [map {{ts => $_ * 60, mg_dl => ($_ >= 10 && $_ < 70) || ($_ >= 75 && $_ < 150) ? 60 : 100}} 0 .. 200];
+  my $ev = events($ext);
+  is $ev->{l1}, 1, 'dips 5 min apart are one event';
+  is $ev->{ext_hypo}, 1, 'and the joined event is extended (>120 min)';
+};
+
+subtest 'events: data ends during the event' => sub {
+  my $seq = sub (@values) { [map {{ts => $_ * 900, mg_dl => $values[$_]}} 0 .. $#values] };
+  is events($seq->(100, 65, 65, 65))->{l1}, 1, 'still below 70 at the last reading: counted';
+  is events($seq->(100, 100, 65))->{l1},    0, 'one low reading at the end: not 15 min yet';
 };
 
 subtest 'AGP slots respect the time zone' => sub {

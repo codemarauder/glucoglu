@@ -10,6 +10,7 @@ our @EXPORT_OK = qw(tier1 agp agp_svg events percentile tz_offset deltas today_s
 # Consensus thresholds (Battelino 2019; 54: IHSG 2017). Inclusive bounds: TIR is 70<=G<=180.
 my ($TIR_LO, $TIR_HI, $TAR_HI, $TBR_LO, $TBR_VLOW) = (70, 180, 250, 70, 54);
 my $EVENT_MIN = 15 * 60;         # event minimum duration (Danne 2017)
+my $GAP_MAX   = 20 * 60;         # longer reading gap breaks continuity: one missing 15-min point plus jitter
 my $EXT_HYPO  = 120 * 60;        # extended hypo: >120 min below 70
 my $EXT_HYPER = 90 * 60;         # shortcut: extended hyper = one continuous >250 stretch >=90 min, not the flapping ">=90 cumulative within 120 min" variant; revisit with 1-min stream data
 
@@ -53,28 +54,49 @@ sub tier1 ($rows, $window_days) {
   };
 }
 
-# Hypo/hyper events (Danne 2017): start >=15 min beyond a threshold, end at/above the exit
-# level (L1 exit >=70, L2 exit >=54). A reading gap >15 min breaks continuity and closes events.
+# Hypo/hyper events (Danne 2017; Battelino 2023 Table 4). Per kind (L1 <70, L2 <54, hyper >250):
+# - starts at the first reading beyond the threshold;
+# - ends only after readings stay at/past the exit level (L1 >=70, L2 >=54, hyper <=250) for 15 min;
+#   a reading beyond the threshold during that time continues the event;
+# - counts if the time beyond the threshold is >=15 min: start to the first exit-level reading.
+# A reading gap >20 min, or the end of the data, closes an open event. If no recovery was seen,
+# the time beyond is start to the last reading beyond: an event cut by a gap still counts (Danne
+# defines the event by its first 15 min), so a sensor gap during a hypo does not hide it.
 sub events ($rows) {
   my %ev = (l1 => 0, l2 => 0, hyper => 0, ext_hypo => 0, ext_hyper => 0);
-  my ($prev, $s70, $s54, $s250);
+  my %rule = (    # kind => [beyond the threshold, at/past the exit level]
+    l1    => [sub ($g) { $g < 70 },  sub ($g) { $g >= 70 }],
+    l2    => [sub ($g) { $g < 54 },  sub ($g) { $g >= 54 }],
+    hyper => [sub ($g) { $g > 250 }, sub ($g) { $g <= 250 }],
+  );
+  my %open;    # kind => {start, last => last reading beyond, exit => first exit-level reading or undef}
+  my $close = sub ($k) {
+    my $e   = delete $open{$k} or return;
+    my $dur = ($e->{exit} // $e->{last}) - $e->{start};
+    return unless $dur >= $EVENT_MIN;
+    $ev{$k}++;
+    $ev{ext_hypo}++  if $k eq 'l1'    && $dur > $EXT_HYPO;
+    $ev{ext_hyper}++ if $k eq 'hyper' && $dur >= $EXT_HYPER;
+  };
+  my $prev;
   for my $r (@$rows) {
     my ($ts, $g) = ($r->{ts}, $r->{mg_dl});
-    ($s70, $s54, $s250) = (undef) x 3 if defined $prev && $ts - $prev > $EVENT_MIN;
-    $s70  //= $ts if $g < 70;
-    $s54  //= $ts if $g < 54;
-    $s250 //= $ts if $g > 250;
-    if ($g >= 70 && defined $s70) {
-      if ($ts - $s70 >= $EVENT_MIN) { $ev{l1}++; $ev{ext_hypo}++ if $ts - $s70 > $EXT_HYPO }
-      $s70 = undef;
-    }
-    if ($g >= 54 && defined $s54) { $ev{l2}++ if $ts - $s54 >= $EVENT_MIN; $s54 = undef }
-    if ($g <= 250 && defined $s250) {
-      if ($ts - $s250 >= $EVENT_MIN) { $ev{hyper}++; $ev{ext_hyper}++ if $ts - $s250 >= $EXT_HYPER }
-      $s250 = undef;
+    if (defined $prev && $ts - $prev > $GAP_MAX) { $close->($_) for keys %open }
+    for my $k (keys %rule) {
+      my ($beyond, $ok) = $rule{$k}->@*;
+      if ($beyond->($g)) {
+        my $e = $open{$k} //= {start => $ts};
+        ($e->{last}, $e->{exit}) = ($ts, undef);
+      }
+      elsif ($open{$k} && $ok->($g)) {
+        my $e = $open{$k};
+        $e->{exit} //= $ts;
+        $close->($k) if $ts - $e->{exit} >= $EVENT_MIN;
+      }
     }
     $prev = $ts;
   }
+  $close->($_) for keys %open;
   return \%ev;
 }
 
