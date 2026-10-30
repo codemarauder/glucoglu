@@ -35,6 +35,16 @@ case $ROLE in
   *)        echo "entrypoint: unknown role '$ROLE' (app or juggluco)"; exit 64 ;;
 esac
 
+# Seconds between two imports of one user. A wrong value would make `sleep` fail at once,
+# and runit would then run the import every second: so only whole numbers, at least 5.
+interval=${JUGGLUCO_IMPORT_INTERVAL:-60}
+case $interval in
+  ''|*[!0-9]*) echo "entrypoint: JUGGLUCO_IMPORT_INTERVAL='$interval' is not whole seconds: using 60"; interval=60 ;;
+esac
+if [ "$interval" -lt 5 ]; then
+  echo "entrypoint: JUGGLUCO_IMPORT_INTERVAL=$interval is below 5: using 5"; interval=5
+fi
+
 users=0
 for dir in "$JUGGLUCO_ROOT"/users/*/; do
   [ -d "$dir" ] || continue
@@ -55,9 +65,9 @@ for dir in "$JUGGLUCO_ROOT"/users/*/; do
     if [ -z "$email" ]; then
       echo "entrypoint: skip $name: no valid EMAIL= line in $dir/user.conf"; continue
     fi
-    # One export + import, then wait 60 s. runit starts it again, so runs never overlap.
+    # One export + import, then wait $interval s. runit starts it again, so runs never overlap.
     mksv "import-$name" "chpst -u glucoglu env GLUCOGLU_LIBRE1_EMAIL='$email' JUGGLUCO_BIN='$BIN' JUGGLUCO_DATA='$dir' /app/script/libre1-sync
-exec sleep ${JUGGLUCO_IMPORT_INTERVAL:-60}"
+exec sleep $interval"
   else
     # The receiver listens on the port set in its own configuration (-d <dir> -p <port>).
     # It writes debug lines for each packet: they go to the log only with JUGGLUCO_DEBUG=1.
