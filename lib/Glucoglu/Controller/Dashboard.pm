@@ -30,8 +30,9 @@ sub index ($self) {
 
   # Standard metrics run on the periodic curve (history/stream). Spot values are
   # scan-biased (you scan when you feel off) and would skew TIR; they still show as "latest".
+  # source_type is needed: the metrics keep one source per 15-min slot (L1).
   my $rows = $db->query(
-    'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl FROM readings
+    'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl, source_type FROM readings
        WHERE user_id = ? AND ts >= to_timestamp(?) AND source_type IN (\'history\', \'stream\')
        ORDER BY ts', $target, time - $days * 86400
   )->hashes->to_array;
@@ -64,7 +65,7 @@ sub index ($self) {
   # Last 24 h summary (rolling, now minus 24 h; the graph above starts at midnight).
   # Same rows as the AGP metrics: history and stream, no spot scans.
   my $rows24 = $db->query(
-    'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl FROM readings
+    'SELECT extract(epoch FROM ts)::bigint AS ts, mg_dl, source_type FROM readings
        WHERE user_id = ? AND ts >= to_timestamp(?) AND source_type IN (\'history\', \'stream\')
        ORDER BY ts', $target, $now - 86400
   )->hashes->to_array;

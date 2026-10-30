@@ -13,7 +13,8 @@ subtest 'percentile' => sub {
 };
 
 subtest 'tier1 basics' => sub {
-  my $m = tier1([map {{ts => 1000 + $_ * 900, mg_dl => $_}} 100, 100, 100, 200], 14);
+  my @v = (100, 100, 100, 200);    # four readings, 15 min apart
+  my $m = tier1([map {{ts => 1000 + $_ * 900, mg_dl => $v[$_]}} 0 .. $#v], 14);
   is $m->{n},     4,     'four readings';
   is $m->{tir},   75,    'TIR counts the in-range share';
   is $m->{tar180}, 25,   'one above 180';
@@ -33,6 +34,67 @@ subtest 'tier1 thresholds are inclusive' => sub {
   is $m->{tir},   100, '70 and 180 count as in range';
   is $m->{tar180}, 0, 'exactly 180 is not above';
   is $m->{tbr70},  0, 'exactly 70 is not below';
+};
+
+subtest 'L1: one source per 15-min slot, time weights' => sub {
+  my $hist   = sub ($ts, $g) { {ts => $ts, mg_dl => $g, source_type => 'history'} };
+  my $stream = sub ($ts, $g) { {ts => $ts, mg_dl => $g, source_type => 'stream'} };
+
+  # Same slot: stream wins, the history value of the same time is dropped.
+  my $m = tier1([$hist->(0, 300), map { $stream->($_ * 60, 100) } 0 .. 14], 1);
+  is $m->{mean}, 100, 'stream and history in one slot: only the stream counts';
+  is $m->{tar180}, 0, 'the dropped history value is not in TAR';
+  is $m->{slots}, 1, 'one filled slot';
+
+  # One 1-min stream day at 60, one 15-min history day at 200: each day is 24 h.
+  my @day1 = map { $stream->($_ * 60, 60) } 0 .. 1439;
+  my @day2 = map { $hist->(86400 + $_ * 900, 200) } 0 .. 95;
+  $m = tier1([@day1, @day2], 2);
+  ok abs($m->{tbr70} - 50) < 1e-9,  'stream day = 50 % of the time (not 1440 of 1536 readings)';
+  ok abs($m->{tar180} - 50) < 1e-9, 'history day = the other 50 %';
+  ok abs($m->{mean} - 130) < 1e-9,  'time-weighted mean';
+  is $m->{sufficiency}, 100, 'both days complete';
+
+  # Sufficiency counts slots, not readings.
+  ok abs(tier1(\@day1, 14)->{sufficiency} - 100 / 14) < 1e-9,
+    'one stream day in 14 days = 1/14, not 100 %';
+
+  # Inside a slot: 10 min at 65 and 5 min at 75 = 10 min below 70 (a slot mean of 68.3 would say 15).
+  $m = tier1([(map { $stream->($_ * 60, 65) } 0 .. 9), (map { $stream->($_ * 60, 75) } 10 .. 14)], 1);
+  ok abs($m->{tbr70} - 100 * 10 / 15) < 1e-9, 'weights keep the minutes inside a slot';
+
+  # History fills a stream gap.
+  $m = tier1([(map { $stream->($_ * 60, 100) } 0 .. 29), $hist->(1800 + 450, 100)], 1);
+  is $m->{slots}, 3, 'two stream slots + one history slot';
+  ok abs($m->{sufficiency} - 100 * 3 / 96) < 1e-9, 'the history slot counts';
+
+  # Rows without source_type count as history (old callers).
+  is tier1([{ts => 0, mg_dl => 300}, {ts => 30, mg_dl => 100}], 1)->{mean}, 200,
+    'no source_type: both kept, same slot, equal weight';
+};
+
+subtest 'L1: events see one source, never mixed' => sub {
+  # 30 min at 60 in the stream; the history values of the same time say 75 (smoothed).
+  my @rows = (
+    (map { {ts => $_ * 60, mg_dl => 60, source_type => 'stream'} } 0 .. 29),
+    (map { {ts => $_ * 60, mg_dl => 100, source_type => 'stream'} } 30 .. 59),
+    (map { {ts => 450 + $_ * 900, mg_dl => 75, source_type => 'history'} } 0 .. 1),
+  );
+  @rows = sort { $a->{ts} <=> $b->{ts} } @rows;
+  my $ev = tier1(\@rows, 1)->{events};
+  is $ev->{l1}, 1, 'the stream hypo counts once';
+  is $ev->{l2}, 0, 'no L2';
+};
+
+subtest 'L1: AGP gives each day one value per slot' => sub {
+  # Day 1: 15 stream values at 100 in slot 0. Day 2: one history value at 200 in slot 0.
+  my @rows = (
+    (map { {ts => $_ * 60, mg_dl => 100, source_type => 'stream'} } 0 .. 14),
+    {ts => 86400 + 450, mg_dl => 200, source_type => 'history'},
+  );
+  my $slot0 = agp(\@rows, 0)->[0];
+  is $slot0->{slot}, 0, 'slot 0';
+  is $slot0->{p50}, 150, 'median of the two days (100, 200), not of 16 readings';
 };
 
 subtest 'events (Danne 2017)' => sub {

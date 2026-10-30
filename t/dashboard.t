@@ -140,6 +140,21 @@ subtest 'Last 24 h summary under Today' => sub {
   $t2->get_ok('/dashboard')->status_is(200)->content_like(qr{Last 24 h: no data});
 };
 
+subtest 'L1 on the dashboard: stream and history of the same time count once' => sub {
+  $db->query('INSERT INTO invites (code) VALUES (?)', 'TEST09');
+  my $tt = Test::Mojo->new('Glucoglu');
+  $tt->app->mailer(Glucoglu::Mailer::Fake->new);
+  _login($tt, 'l1@b.co', 'TEST09');
+  my $uid = $db->query('SELECT id FROM users WHERE email = ?', 'l1@b.co')->array->[0];
+  my $ins = 'INSERT INTO readings (user_id, ts, mg_dl, source_type, raw) VALUES (?, to_timestamp(?), ?, ?, \'{}\')';
+  my $slot = int((time - 3 * 3600) / 900) * 900;    # one 15-min slot, 3 h ago
+  $db->query($ins, $uid, $slot + 60 * $_, 100, 'stream') for 0 .. 14;    # stream: 100
+  $db->query($ins, $uid, $slot + 450, 300, 'history');                    # history, same slot: 300
+  $tt->get_ok('/dashboard')->status_is(200)
+    ->content_like(qr{Mean: 100\b}, '24 h mean uses the stream only (counting both would give 112)')
+    ->content_like(qr{&gt;180: 0%}, 'the history value is not above 180 time');
+};
+
 subtest 'settings holds ingest and account' => sub {
   $t->get_ok('/dashboard/settings')->status_is(200)
     ->content_like(qr{Regenerate ingest token})->content_like(qr{Log out})

@@ -2,18 +2,21 @@
 # Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 package Glucoglu::Metrics;
 # Pure Tier 1 metrics engine (design §7, rows 1-11) — no DB, no HTTP; testable in isolation.
-# Rows must be [{ts => epoch seconds, mg_dl => value}, ...] sorted by ts.
+# Rows must be [{ts => epoch seconds, mg_dl => value, source_type => 'history'|'stream'}, ...]
+# sorted by ts. A row without source_type counts as history.
 use Mojo::Base -base, -signatures;
 use utf8;
 
 use Exporter 'import';
-our @EXPORT_OK = qw(tier1 agp agp_svg events percentile tz_offset deltas today_svg);
+use POSIX qw(floor);
+our @EXPORT_OK = qw(tier1 agp agp_svg events percentile tz_offset deltas today_svg select_slots);
 
 # Consensus thresholds (Battelino 2019; 54: IHSG 2017). Inclusive bounds: TIR is 70<=G<=180.
 my ($TIR_LO, $TIR_HI, $TAR_HI, $TBR_LO, $TBR_VLOW) = (70, 180, 250, 70, 54);
 my $EVENT_MIN = 15 * 60;         # event minimum duration (Danne 2017)
 my $GAP_MAX   = 20 * 60;         # longer reading gap breaks continuity: one missing 15-min point plus jitter
 my $EXT_HYPO  = 120 * 60;        # extended hypo: >120 min below 70
+my $SLOT      = 15 * 60;         # time slot for source choice, weights and sufficiency (L1)
 my $EXT_HYPER = 90 * 60;         # shortcut: extended hyper = one continuous >250 stretch >=90 min, not the flapping ">=90 cumulative within 120 min" variant; revisit with 1-min stream data
 
 sub percentile ($values, $p) {
@@ -26,33 +29,64 @@ sub percentile ($values, $p) {
   return $lo < $#s ? $s[$lo] + ($s[$lo + 1] - $s[$lo]) * $frac : $s[-1];
 }
 
+# L1: one source per 15-min slot, each reading weighted by the time it covers.
+# - A slot with stream readings uses only them; else its history value(s). So stream and
+#   history for the same time are never counted twice, and history fills stream gaps.
+# - Each filled slot is worth 15 min, shared by its kept readings: one history value
+#   = 15 min, fifteen 1-min stream values = 1 min each. So a 1-min day and a 15-min day
+#   have the same weight. A history value covers the 15 min around its timestamp
+#   (checked 2026-10-25), so it goes in the slot that contains its timestamp.
+# Returns (kept rows sorted by ts, each with w => seconds; number of filled slots).
+sub select_slots ($rows) {
+  my %slot;    # slot number => {stream => [rows], history => [rows]}
+  for my $r (@$rows) {
+    my $src = ($r->{source_type} // '') eq 'stream' ? 'stream' : 'history';
+    push $slot{floor($r->{ts} / $SLOT)}{$src}->@*, $r;
+  }
+  my @kept;
+  for my $s (values %slot) {
+    my $use = $s->{stream} // $s->{history};
+    my $w   = $SLOT / @$use;
+    push @kept, map { +{%$_, w => $w} } @$use;
+  }
+  return ([sort { $a->{ts} <=> $b->{ts} } @kept], scalar keys %slot);
+}
+
 sub tier1 ($rows, $window_days) {
-  my @g = map { $_->{mg_dl} } @$rows;
-  my $n = scalar @g;
-  return {n => 0, events => {}} unless $n;
+  my ($kept, $slots) = select_slots($rows);
+  my $n = @$kept;
+  return {n => 0, slots => 0, events => {}} unless $n;
 
-  my $sum = 0; $sum += $_ for @g;
-  my $mean = $sum / $n;
-  my $var  = 0; $var += ($_ - $mean)**2 for @g;
-  my $sd   = sqrt $var / $n;
-  my $pct  = sub ($lo, $hi) { 100 * (grep { $_ >= $lo && $_ <= $hi } @g) / $n };
+  # Time-weighted: percentages are minutes in the range / all minutes; mean and SD weighted.
+  # Do not use a plain slot mean: 10 min at 65 and 5 min at 75 average 68.3, which would
+  # count the whole 15 min as below 70; the weights count 10 min.
+  my ($total, $sum) = (0, 0);
+  for (@$kept) { $total += $_->{w}; $sum += $_->{w} * $_->{mg_dl} }
+  my $mean = $sum / $total;
+  my $var  = 0; $var += $_->{w} * ($_->{mg_dl} - $mean)**2 for @$kept;
+  my $sd   = sqrt $var / $total;
+  my $pct  = sub ($lo, $hi) {
+    my $in = 0; $in += $_->{w} for grep { $_->{mg_dl} >= $lo && $_->{mg_dl} <= $hi } @$kept;
+    100 * $in / $total;
+  };
 
-  # shortcut: expected readings assume the 15-min cadence (96/day); stream users trivially pass
+  # Sufficiency: filled 15-min slots / expected slots (design §7 rows 10 and 26).
   my $expected = $window_days * 96;
   return {
-    n    => $n,
-    tir  => $pct->($TIR_LO, $TIR_HI),
+    n      => $n,
+    slots  => $slots,
+    tir    => $pct->($TIR_LO, $TIR_HI),
     tar180 => $pct->($TIR_HI + 0.0001, 1e9),
     tar250 => $pct->($TAR_HI + 0.0001, 1e9),
     tbr70  => $pct->(-1e9, $TBR_LO - 0.0001),
     tbr54  => $pct->(-1e9, $TBR_VLOW - 0.0001),
-    mean => $mean,
-    sd   => $sd,
-    cv   => $mean ? 100 * $sd / $mean : 0,
-    gmi  => 3.31 + 0.02392 * $mean,      # Bergenstal 2018
-    ea1c => ($mean + 46.7) / 28.7,       # Nathan 2008 (ADAG)
-    sufficiency => $expected ? ($n / $expected > 1 ? 100 : 100 * $n / $expected) : 0,
-    events => events($rows),
+    mean   => $mean,
+    sd     => $sd,
+    cv     => $mean ? 100 * $sd / $mean : 0,
+    gmi    => 3.31 + 0.02392 * $mean,      # Bergenstal 2018
+    ea1c   => ($mean + 46.7) / 28.7,       # Nathan 2008 (ADAG)
+    sufficiency => $expected ? ($slots >= $expected ? 100 : 100 * $slots / $expected) : 0,
+    events => events($kept),               # 1-min detail where a stream exists, never mixed
   };
 }
 
@@ -103,12 +137,17 @@ sub events ($rows) {
 }
 
 # AGP (§6): percentiles 5/25/50/75/95 per 15-min time-of-day slot, in the user's local time.
+# L1: the readings come from select_slots, and each day gives one value per slot (the mean
+# of its kept readings), so a 1-min stream day counts the same as a 15-min history day.
 sub agp ($rows, $tz_off) {
+  my ($kept) = select_slots($rows);
+  my %day_slot;    # local day-and-slot number => [values]
+  push $day_slot{floor(($_->{ts} + $tz_off) / $SLOT)}->@*, $_->{mg_dl} for @$kept;
   my @slots = map { [] } 1 .. 96;
-  for my $r (@$rows) {
-    my $local  = $r->{ts} + $tz_off;
-    my $minute = (($local % 86400) + 86400) % 86400;
-    push $slots[int $minute / 900]->@*, $r->{mg_dl};
+  for my $k (keys %day_slot) {
+    my $v = $day_slot{$k};
+    my $m = 0; $m += $_ for @$v;
+    push $slots[$k % 96]->@*, $m / @$v;
   }
   my @out;
   for my $i (0 .. 95) {
