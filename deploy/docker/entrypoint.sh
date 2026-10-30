@@ -57,7 +57,7 @@ for dir in "$JUGGLUCO_ROOT"/users/*/; do
     fi
     # One export + import, then wait 60 s. runit starts it again, so runs never overlap.
     mksv "import-$name" "chpst -u glucoglu env GLUCOGLU_LIBRE1_EMAIL='$email' JUGGLUCO_BIN='$BIN' JUGGLUCO_DATA='$dir' /app/script/libre1-sync
-exec sleep 60"
+exec sleep ${JUGGLUCO_IMPORT_INTERVAL:-60}"
   else
     # The receiver listens on the port set in its own configuration (-d <dir> -p <port>).
     # It writes debug lines for each packet: they go to the log only with JUGGLUCO_DEBUG=1.
