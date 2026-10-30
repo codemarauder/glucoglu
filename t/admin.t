@@ -86,6 +86,25 @@ subtest 'TSV import (Libre 1 mirror path)' => sub {
   is $one->('SELECT count(*) FROM readings'), 6, 'history + spot both stored';
 }, $one;
 
+subtest 'stream from the mirror and from the uploader is stored once' => sub {
+  $db->query(q{INSERT INTO users (email, api_token) VALUES ('str@b.co', 'tokstream')});
+  my $tim = 1792847000;    # Juggluco uploads date = tim * 1000 and exports UnixTime = tim
+  $t->post_ok('/api/v1/entries?token=tokstream',
+    json => [{type => 'sgv', date => $tim * 1000, sgv => 140, device => '3MHSTREAM'}])->status_is(200);
+
+  my ($fh, $file) = tempfile(UNLINK => 1, SUFFIX => '.tsv');
+  print $fh "Sensorid\tnr\tUnixTime\tYYYY-mm-ddTHH:MM:SS\tTZ\tMin\tmg/dL\tRate\tChangeLabel\n";
+  print $fh join("\t", '3MHSTREAM', 1, $tim,      'x', '5.5', 100, 140, '0.1', 'STABLE'), "\n";   # also uploaded
+  print $fh join("\t", '3MHSTREAM', 2, $tim + 60, 'x', '5.5', 101, 142, '0.2', 'STABLE'), "\n";   # only mirrored
+  close $fh;
+  my $out = qx{$^X script/glucoglu-admin import stream $file 'str\@b.co' 2>&1};
+  ok !$?, 'stream import exits 0';
+  like $out, qr/imported 1 stream readings for str\@b\.co \(1 duplicates/, 'the uploaded value is a duplicate';
+  my $uid = $one->(q{SELECT id FROM users WHERE email = 'str@b.co'});
+  is $one->("SELECT count(*) FROM readings WHERE user_id = $uid AND source_type = 'stream'"), 2, 'two stream rows, not three';
+  is $one->("SELECT min(source_interval) FROM readings WHERE user_id = $uid"), 1, 'same source_interval as the uploader';
+}, $one;
+
 subtest 'import skips rows older than newest minus 9 h, keeps newer ones' => sub {
   $db->query(q{INSERT INTO users (email) VALUES ('win@b.co')});
   my $newest = 1792847053;
