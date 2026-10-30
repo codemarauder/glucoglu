@@ -122,13 +122,13 @@ subtest 'Last 24 h summary under Today' => sub {
   $ins->($u1, $now - 3 * 3600, 999, 'spot');        # spot: not counted
   $t1->get_ok('/dashboard')->status_is(200)
     ->content_like(qr{Last 24 h:}, 'label says Last 24 h')
-    ->content_like(qr{<span class="warn">TIR 70%</span>}, 'TIR with its grade')
-    ->content_like(qr{<span class="bad">&lt;70 20%</span>}, '<70 with its grade')
-    ->content_like(qr{<span class="bad">&lt;54 10%</span>}, '<54')
-    ->content_like(qr{<span class="good">&gt;180 10%</span>}, '>180')
-    ->content_like(qr{Mean 115\b}, 'mean excludes the old reading and the spot value')
-    ->content_like(qr{Hypos 1\b}, 'one hypo event')
-    ->content_like(qr{Data 10%}, 'data share of 96 slots')
+    ->content_like(qr{<span class="warn">TIR: 70%</span>}, 'TIR with its grade')
+    ->content_like(qr{<span class="bad">&lt;70: 20%</span>}, '<70 with its grade')
+    ->content_like(qr{<span class="bad">&lt;54: 10%</span>}, '<54')
+    ->content_like(qr{<span class="good">&gt;180: 10%</span>}, '>180')
+    ->content_like(qr{Mean: 115\b}, 'mean excludes the old reading and the spot value')
+    ->content_like(qr{Hypos: 1\b}, 'one hypo event')
+    ->content_like(qr{Data: 10%}, 'data share of 96 slots')
     ->content_like(qr{Targets are for 14 days}, 'note about the targets')
     ->text_unlike('p.last24' => qr{GMI|eA1c|CV|SD}, 'no GMI, eA1c, CV or SD in the line');
 
