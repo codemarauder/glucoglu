@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 package Glucoglu::Controller::Dashboard;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 

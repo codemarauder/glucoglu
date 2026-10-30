@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 # Glucoglu container
-# License: AGPL-3.0
 #
 # One image, two roles (deploy/docker/entrypoint.sh; docker-compose.yml runs both):
 #   app       runit services: glucoglu (web app, Mojolicious prefork on :3000; Apache on

@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only
+     Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in> -->
 # Juggluco users (Libre 1)
 
 A Libre 1 sensor is NFC only. Its data reaches Glucoglu through a Juggluco mirror:

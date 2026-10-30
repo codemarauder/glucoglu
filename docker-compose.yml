@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 # Glucoglu: two containers from one image (runit inside each).
-# License: AGPL-3.0
 #
 #   glucoglu  web app, daily prune, Libre 1 import for each Juggluco user. Has the secrets.
 #   juggluco  Juggluco mirror receivers, one per user, open to the internet. No secrets,

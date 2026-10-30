@@ -1,2 +1,4 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 exec chpst -u glucoglu svlogd -tt /var/log/glucoglu-import

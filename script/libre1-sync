@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 # Libre 1 path: export one person's Juggluco mirror data as TSV and import it.
 # A runit service runs it every 60 s (on the host: glucoglu-import; in Docker: import-<name>).
 # The import reads only rows newer than the last import minus 9 h, so repeats are

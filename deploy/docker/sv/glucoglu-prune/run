@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 # Daily: drop expired login tokens and old mail log. Retry in 5 min if the database is not ready.
 exec 2>&1
 chpst -u glucoglu perl /app/script/glucoglu-admin prune || exec sleep 300

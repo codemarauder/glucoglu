@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 # Container PID 1 (under docker's init). Makes the runit services, runs them, and
 # stops them cleanly on `docker stop`.
 #

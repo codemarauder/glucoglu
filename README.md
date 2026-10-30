@@ -1,10 +1,14 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only
+     Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in> -->
 # Glucoglu
 
 Self-hosted glucose monitoring and analytics. Perl / Mojolicious + PostgreSQL + PWA, no npm, no pip.
 
 > Glucoglu: the glue for your glucose data from Juggluco.
 
-Design and scope: `glucoglu-scope-design.md`. License: AGPLv3.
+Design and scope: `glucoglu-scope-design.md`.
+
+License: AGPL-3.0-only (see `LICENSE`). Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>. Each file has an SPDX header.
 
 ## What v1 contains so far
 

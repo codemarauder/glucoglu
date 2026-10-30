@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 # Libre 1 sync: one export + import, then wait 60 s. runit starts it again, so runs never overlap.
 exec 2>&1
 chpst -u glucoglu -e /etc/glucoglu/env \

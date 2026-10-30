@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in>
 package Glucoglu::Metrics;
 # Pure Tier 1 metrics engine (design §7, rows 1-11) — no DB, no HTTP; testable in isolation.
 # Rows must be [{ts => epoch seconds, mg_dl => value}, ...] sorted by ts.

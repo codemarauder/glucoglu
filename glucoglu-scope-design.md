@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only
+     Copyright (C) 2026 Nishant Sharma <nishant@hopbox.in> -->
 # Glucoglu — Self-Hosted Glucose Monitoring & Analytics Platform (Handoff v2.2)
 
 *   **Version:** 2.2 (supersedes `project_handoff.md` v1; v2.1: storage → PostgreSQL, O1–O6/O8 resolved, caregiver sharing added; v2.2, 2026-10-25: code review fixes, Danne event rule with gap tolerance, unit rule with sensor-range limits, quick log in the PWA (D17), Juggluco treatments not ingested)
@@ -44,7 +46,7 @@ Core philosophy: minimize supply-chain attack vectors and dependency bloat. Use 
 | D12 | Export: CSV + browser PDF (PWA print stylesheet) in v1; right-to-delete at the storage layer; scheduled/emailed reports in v2 via headless Chromium (not Selenium) |
 | D13 | Time: store UTC; per-user time zone from the browser; reports convert |
 | D14 | Product: Glucoglu — "the glue for your glucose data from Juggluco" (login page). One canonical domain for app + mail; optional defensive redirect of the .com to the canonical. Juggluco name: nominative use only — factual data source, no logos, no "official" |
-| D15 | License: AGPLv3. Applies also to the hosted service. GPLv3 code can enter the project (GPLv3 §14); check Juggluco's license file only if we ever copy its code |
+| D15 | License: AGPL-3.0-only (no "or later"); copyright Nishant Sharma; SPDX header in each file. Applies also to the hosted service. GPLv3 code can enter the project (GPLv3 §14); check Juggluco's license file only if we ever copy its code |
 | D16 | Deploy: two options. **A: Docker**, one image (Debian trixie-slim, runit inside) in two containers: `glucoglu` (web app, daily prune, one Libre 1 import per Juggluco user; has the secrets) and `juggluco` (one Juggluco mirror receiver per user, open to the internet on ports 9001–9010; no secrets, no database access). Juggluco users: one data folder per person, `users/<name>/` with `user.conf` (EMAIL=), always used with an explicit `-d`; the containers make the per-user services at each start. An entrypoint stops the services cleanly on `docker stop` (runsvdir alone exits on TERM and leaves them running). Port 3000 is published on 127.0.0.1 only (Docker's published ports bypass ufw); PostgreSQL on the host through the pinned bridge gateway. **B: host runit** (`deploy/runit/`): perlbrew Perl (`perl-5.x@glucoglu` lib), hypnotoad in the foreground, envdir settings; one Libre 1 user. In both, a front-end proxy (e.g. Apache) on the host owns TLS on 443 and proxies to 127.0.0.1:3000; the app trusts X-Forwarded-* |
 | D17 | Meal, exercise and sleep marks are logged in the Glucoglu PWA (quick log, §6), one tap each. Juggluco treatments (`/api/v1/treatments`) and mirror amounts (`-N` export) are not ingested in v1: Juggluco's entry UI is hard to use, and one in-app path gives one data format. Turn off sending amounts/treatments in Juggluco, so its uploader does not retry against an endpoint we do not serve |
 
